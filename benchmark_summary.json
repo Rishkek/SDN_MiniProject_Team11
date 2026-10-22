@@ -1,0 +1,1008 @@
+{
+  "static": {
+    "mode": "STATIC",
+    "adaptive_enabled": false,
+    "avg_throughput_mbps": 3.89,
+    "avg_loss_pct": 23.96,
+    "peak_loss_pct": 61.5,
+    "avg_latency_ms": 130.09,
+    "avg_jitter_ms": 0.9,
+    "recovery_time_sec": 0.0,
+    "total_packets_sent": 17578,
+    "total_packets_received": 12852,
+    "total_packets_lost": 4726,
+    "reroute_events": [],
+    "time_series": [
+      {
+        "timestamp": 0.5,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 2.09,
+        "jitter_ms": 0.0,
+        "packets_recv": 1,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 1.0,
+        "throughput_mbps": 5.968,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 3.01,
+        "jitter_ms": 0.43,
+        "packets_recv": 366,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 1.5,
+        "throughput_mbps": 5.751,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 16.44,
+        "jitter_ms": 0.56,
+        "packets_recv": 717,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 2.01,
+        "throughput_mbps": 6.096,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 24.04,
+        "jitter_ms": 0.63,
+        "packets_recv": 1090,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 2.51,
+        "throughput_mbps": 5.805,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 23.2,
+        "jitter_ms": 0.49,
+        "packets_recv": 1445,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 3.01,
+        "throughput_mbps": 5.183,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 54.79,
+        "jitter_ms": 0.79,
+        "packets_recv": 1762,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 3.51,
+        "throughput_mbps": 4.759,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 125.58,
+        "jitter_ms": 1.05,
+        "packets_recv": 2053,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 4.01,
+        "throughput_mbps": 5.55,
+        "loss_pct": 18.71,
+        "avg_latency_ms": 161.77,
+        "jitter_ms": 0.39,
+        "packets_recv": 2392,
+        "packets_lost": 78
+      },
+      {
+        "timestamp": 4.51,
+        "throughput_mbps": 4.955,
+        "loss_pct": 7.34,
+        "avg_latency_ms": 156.56,
+        "jitter_ms": 0.64,
+        "packets_recv": 2695,
+        "packets_lost": 102
+      },
+      {
+        "timestamp": 5.01,
+        "throughput_mbps": 5.398,
+        "loss_pct": 17.29,
+        "avg_latency_ms": 158.44,
+        "jitter_ms": 0.63,
+        "packets_recv": 3025,
+        "packets_lost": 171
+      },
+      {
+        "timestamp": 5.51,
+        "throughput_mbps": 5.551,
+        "loss_pct": 8.87,
+        "avg_latency_ms": 148.94,
+        "jitter_ms": 0.76,
+        "packets_recv": 3364,
+        "packets_lost": 204
+      },
+      {
+        "timestamp": 6.01,
+        "throughput_mbps": 5.587,
+        "loss_pct": 4.74,
+        "avg_latency_ms": 144.68,
+        "jitter_ms": 0.56,
+        "packets_recv": 3706,
+        "packets_lost": 221
+      },
+      {
+        "timestamp": 6.51,
+        "throughput_mbps": 5.853,
+        "loss_pct": 4.28,
+        "avg_latency_ms": 138.25,
+        "jitter_ms": 0.78,
+        "packets_recv": 4064,
+        "packets_lost": 237
+      },
+      {
+        "timestamp": 7.01,
+        "throughput_mbps": 4.193,
+        "loss_pct": 6.91,
+        "avg_latency_ms": 166.41,
+        "jitter_ms": 2.09,
+        "packets_recv": 4320,
+        "packets_lost": 256
+      },
+      {
+        "timestamp": 7.51,
+        "throughput_mbps": 5.321,
+        "loss_pct": 30.41,
+        "avg_latency_ms": 178.46,
+        "jitter_ms": 0.6,
+        "packets_recv": 4645,
+        "packets_lost": 398
+      },
+      {
+        "timestamp": 8.02,
+        "throughput_mbps": 2.859,
+        "loss_pct": 48.38,
+        "avg_latency_ms": 166.1,
+        "jitter_ms": 1.27,
+        "packets_recv": 4820,
+        "packets_lost": 562
+      },
+      {
+        "timestamp": 8.52,
+        "throughput_mbps": 2.835,
+        "loss_pct": 53.48,
+        "avg_latency_ms": 159.88,
+        "jitter_ms": 2.75,
+        "packets_recv": 4994,
+        "packets_lost": 762
+      },
+      {
+        "timestamp": 9.02,
+        "throughput_mbps": 2.43,
+        "loss_pct": 61.5,
+        "avg_latency_ms": 138.98,
+        "jitter_ms": 0.79,
+        "packets_recv": 5143,
+        "packets_lost": 1000
+      },
+      {
+        "timestamp": 9.52,
+        "throughput_mbps": 3.252,
+        "loss_pct": 46.07,
+        "avg_latency_ms": 129.91,
+        "jitter_ms": 0.52,
+        "packets_recv": 5342,
+        "packets_lost": 1170
+      },
+      {
+        "timestamp": 10.03,
+        "throughput_mbps": 2.801,
+        "loss_pct": 52.88,
+        "avg_latency_ms": 135.86,
+        "jitter_ms": 0.66,
+        "packets_recv": 5514,
+        "packets_lost": 1363
+      },
+      {
+        "timestamp": 10.53,
+        "throughput_mbps": 2.903,
+        "loss_pct": 52.77,
+        "avg_latency_ms": 131.33,
+        "jitter_ms": 0.77,
+        "packets_recv": 5693,
+        "packets_lost": 1563
+      },
+      {
+        "timestamp": 11.03,
+        "throughput_mbps": 3.145,
+        "loss_pct": 48.26,
+        "avg_latency_ms": 127.61,
+        "jitter_ms": 0.96,
+        "packets_recv": 5886,
+        "packets_lost": 1743
+      },
+      {
+        "timestamp": 11.54,
+        "throughput_mbps": 3.097,
+        "loss_pct": 48.37,
+        "avg_latency_ms": 128.77,
+        "jitter_ms": 0.96,
+        "packets_recv": 6076,
+        "packets_lost": 1921
+      },
+      {
+        "timestamp": 12.04,
+        "throughput_mbps": 2.85,
+        "loss_pct": 50.98,
+        "avg_latency_ms": 131.91,
+        "jitter_ms": 0.57,
+        "packets_recv": 6251,
+        "packets_lost": 2103
+      },
+      {
+        "timestamp": 12.54,
+        "throughput_mbps": 2.992,
+        "loss_pct": 48.01,
+        "avg_latency_ms": 135.73,
+        "jitter_ms": 1.16,
+        "packets_recv": 6434,
+        "packets_lost": 2272
+      },
+      {
+        "timestamp": 13.04,
+        "throughput_mbps": 2.892,
+        "loss_pct": 53.91,
+        "avg_latency_ms": 141.36,
+        "jitter_ms": 0.59,
+        "packets_recv": 6611,
+        "packets_lost": 2479
+      },
+      {
+        "timestamp": 13.54,
+        "throughput_mbps": 2.534,
+        "loss_pct": 56.34,
+        "avg_latency_ms": 143.42,
+        "jitter_ms": 1.19,
+        "packets_recv": 6766,
+        "packets_lost": 2679
+      },
+      {
+        "timestamp": 14.04,
+        "throughput_mbps": 2.357,
+        "loss_pct": 58.02,
+        "avg_latency_ms": 165.25,
+        "jitter_ms": 1.36,
+        "packets_recv": 6910,
+        "packets_lost": 2878
+      },
+      {
+        "timestamp": 14.54,
+        "throughput_mbps": 2.773,
+        "loss_pct": 57.71,
+        "avg_latency_ms": 161.42,
+        "jitter_ms": 1.7,
+        "packets_recv": 7080,
+        "packets_lost": 3110
+      },
+      {
+        "timestamp": 15.06,
+        "throughput_mbps": 3.074,
+        "loss_pct": 48.25,
+        "avg_latency_ms": 134.95,
+        "jitter_ms": 0.58,
+        "packets_recv": 7272,
+        "packets_lost": 3289
+      },
+      {
+        "timestamp": 15.56,
+        "throughput_mbps": 2.648,
+        "loss_pct": 56.42,
+        "avg_latency_ms": 143.87,
+        "jitter_ms": 1.11,
+        "packets_recv": 7435,
+        "packets_lost": 3500
+      },
+      {
+        "timestamp": 16.06,
+        "throughput_mbps": 3.1,
+        "loss_pct": 49.06,
+        "avg_latency_ms": 122.75,
+        "jitter_ms": 0.7,
+        "packets_recv": 7625,
+        "packets_lost": 3683
+      },
+      {
+        "timestamp": 16.56,
+        "throughput_mbps": 3.115,
+        "loss_pct": 46.35,
+        "avg_latency_ms": 123.46,
+        "jitter_ms": 1.19,
+        "packets_recv": 7816,
+        "packets_lost": 3848
+      },
+      {
+        "timestamp": 17.07,
+        "throughput_mbps": 2.221,
+        "loss_pct": 57.37,
+        "avg_latency_ms": 168.91,
+        "jitter_ms": 0.98,
+        "packets_recv": 7952,
+        "packets_lost": 4031
+      },
+      {
+        "timestamp": 17.57,
+        "throughput_mbps": 3.013,
+        "loss_pct": 55.66,
+        "avg_latency_ms": 138.06,
+        "jitter_ms": 0.54,
+        "packets_recv": 8136,
+        "packets_lost": 4262
+      },
+      {
+        "timestamp": 18.07,
+        "throughput_mbps": 5.119,
+        "loss_pct": 14.01,
+        "avg_latency_ms": 144.65,
+        "jitter_ms": 0.64,
+        "packets_recv": 8449,
+        "packets_lost": 4313
+      },
+      {
+        "timestamp": 18.57,
+        "throughput_mbps": 5.832,
+        "loss_pct": 7.77,
+        "avg_latency_ms": 142.34,
+        "jitter_ms": 0.46,
+        "packets_recv": 8805,
+        "packets_lost": 4343
+      },
+      {
+        "timestamp": 19.07,
+        "throughput_mbps": 5.698,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 109.08,
+        "jitter_ms": 0.65,
+        "packets_recv": 9153,
+        "packets_lost": 4343
+      },
+      {
+        "timestamp": 19.57,
+        "throughput_mbps": 5.254,
+        "loss_pct": 9.58,
+        "avg_latency_ms": 149.66,
+        "jitter_ms": 0.54,
+        "packets_recv": 9474,
+        "packets_lost": 4377
+      },
+      {
+        "timestamp": 20.07,
+        "throughput_mbps": 5.249,
+        "loss_pct": 14.85,
+        "avg_latency_ms": 159.39,
+        "jitter_ms": 0.74,
+        "packets_recv": 9795,
+        "packets_lost": 4433
+      },
+      {
+        "timestamp": 20.57,
+        "throughput_mbps": 5.74,
+        "loss_pct": 6.38,
+        "avg_latency_ms": 143.33,
+        "jitter_ms": 0.55,
+        "packets_recv": 10147,
+        "packets_lost": 4457
+      },
+      {
+        "timestamp": 21.07,
+        "throughput_mbps": 5.107,
+        "loss_pct": 7.14,
+        "avg_latency_ms": 146.06,
+        "jitter_ms": 1.55,
+        "packets_recv": 10459,
+        "packets_lost": 4481
+      },
+      {
+        "timestamp": 21.57,
+        "throughput_mbps": 6.24,
+        "loss_pct": 7.75,
+        "avg_latency_ms": 133.97,
+        "jitter_ms": 0.41,
+        "packets_recv": 10840,
+        "packets_lost": 4513
+      },
+      {
+        "timestamp": 22.08,
+        "throughput_mbps": 5.66,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 110.7,
+        "jitter_ms": 1.25,
+        "packets_recv": 11189,
+        "packets_lost": 4513
+      },
+      {
+        "timestamp": 22.58,
+        "throughput_mbps": 5.523,
+        "loss_pct": 7.9,
+        "avg_latency_ms": 148.02,
+        "jitter_ms": 0.62,
+        "packets_recv": 11527,
+        "packets_lost": 4542
+      },
+      {
+        "timestamp": 23.08,
+        "throughput_mbps": 5.188,
+        "loss_pct": 11.94,
+        "avg_latency_ms": 156.46,
+        "jitter_ms": 0.77,
+        "packets_recv": 11844,
+        "packets_lost": 4585
+      },
+      {
+        "timestamp": 23.58,
+        "throughput_mbps": 5.3,
+        "loss_pct": 14.51,
+        "avg_latency_ms": 156.58,
+        "jitter_ms": 0.52,
+        "packets_recv": 12168,
+        "packets_lost": 4640
+      },
+      {
+        "timestamp": 24.08,
+        "throughput_mbps": 5.034,
+        "loss_pct": 10.2,
+        "avg_latency_ms": 157.66,
+        "jitter_ms": 1.3,
+        "packets_recv": 12476,
+        "packets_lost": 4675
+      },
+      {
+        "timestamp": 24.58,
+        "throughput_mbps": 5.351,
+        "loss_pct": 9.92,
+        "avg_latency_ms": 146.45,
+        "jitter_ms": 0.75,
+        "packets_recv": 12803,
+        "packets_lost": 4711
+      },
+      {
+        "timestamp": 25.15,
+        "throughput_mbps": 0.702,
+        "loss_pct": 23.44,
+        "avg_latency_ms": 167.95,
+        "jitter_ms": 1.4,
+        "packets_recv": 12852,
+        "packets_lost": 4726
+      },
+      {
+        "timestamp": 25.65,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 1.4,
+        "packets_recv": 12852,
+        "packets_lost": 4726
+      },
+      {
+        "timestamp": 26.15,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 1.4,
+        "packets_recv": 12852,
+        "packets_lost": 4726
+      },
+      {
+        "timestamp": 26.65,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 1.4,
+        "packets_recv": 12852,
+        "packets_lost": 4726
+      },
+      {
+        "timestamp": 27.16,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 1.4,
+        "packets_recv": 12852,
+        "packets_lost": 4726
+      }
+    ]
+  },
+  "dynamic": {
+    "mode": "DYNAMIC",
+    "adaptive_enabled": true,
+    "avg_throughput_mbps": 5.09,
+    "avg_loss_pct": 5.73,
+    "peak_loss_pct": 52.26,
+    "avg_latency_ms": 89.3,
+    "avg_jitter_ms": 0.61,
+    "recovery_time_sec": 0.009,
+    "total_packets_sent": 17579,
+    "total_packets_received": 16511,
+    "total_packets_lost": 1120,
+    "reroute_events": [
+      {
+        "timestamp": 1792677134.240245,
+        "from_path": "Path-A (S1 -> S2 -> S4)",
+        "to_path": "Path-B (S1 -> S3 -> S4)",
+        "reason": "Congestion threshold exceeded",
+        "path_a_load_at_trigger": 13.007522328440512,
+        "path_b_load_at_trigger": 0.0,
+        "recovery_time_sec": 0.0095,
+        "status": "SUCCESS"
+      }
+    ],
+    "time_series": [
+      {
+        "timestamp": 0.5,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 0.0,
+        "packets_recv": 0,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 1.0,
+        "throughput_mbps": 5.782,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 5.31,
+        "jitter_ms": 0.53,
+        "packets_recv": 355,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 1.5,
+        "throughput_mbps": 5.487,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 46.38,
+        "jitter_ms": 0.68,
+        "packets_recv": 690,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 2.0,
+        "throughput_mbps": 5.508,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 72.5,
+        "jitter_ms": 0.62,
+        "packets_recv": 1028,
+        "packets_lost": 0
+      },
+      {
+        "timestamp": 2.51,
+        "throughput_mbps": 4.806,
+        "loss_pct": 7.26,
+        "avg_latency_ms": 147.31,
+        "jitter_ms": 0.71,
+        "packets_recv": 1322,
+        "packets_lost": 23
+      },
+      {
+        "timestamp": 3.01,
+        "throughput_mbps": 5.814,
+        "loss_pct": 7.53,
+        "avg_latency_ms": 141.88,
+        "jitter_ms": 0.43,
+        "packets_recv": 1678,
+        "packets_lost": 52
+      },
+      {
+        "timestamp": 3.51,
+        "throughput_mbps": 5.937,
+        "loss_pct": 3.46,
+        "avg_latency_ms": 138.73,
+        "jitter_ms": 0.45,
+        "packets_recv": 2041,
+        "packets_lost": 65
+      },
+      {
+        "timestamp": 4.01,
+        "throughput_mbps": 5.247,
+        "loss_pct": 13.01,
+        "avg_latency_ms": 155.47,
+        "jitter_ms": 0.91,
+        "packets_recv": 2362,
+        "packets_lost": 113
+      },
+      {
+        "timestamp": 4.51,
+        "throughput_mbps": 5.92,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 132.03,
+        "jitter_ms": 0.42,
+        "packets_recv": 2724,
+        "packets_lost": 113
+      },
+      {
+        "timestamp": 5.01,
+        "throughput_mbps": 5.352,
+        "loss_pct": 3.82,
+        "avg_latency_ms": 145.42,
+        "jitter_ms": 1.06,
+        "packets_recv": 3051,
+        "packets_lost": 126
+      },
+      {
+        "timestamp": 5.51,
+        "throughput_mbps": 5.562,
+        "loss_pct": 11.46,
+        "avg_latency_ms": 152.18,
+        "jitter_ms": 0.43,
+        "packets_recv": 3391,
+        "packets_lost": 170
+      },
+      {
+        "timestamp": 6.01,
+        "throughput_mbps": 5.021,
+        "loss_pct": 11.27,
+        "avg_latency_ms": 160.97,
+        "jitter_ms": 0.34,
+        "packets_recv": 3698,
+        "packets_lost": 209
+      },
+      {
+        "timestamp": 6.51,
+        "throughput_mbps": 5.727,
+        "loss_pct": 9.79,
+        "avg_latency_ms": 144.63,
+        "jitter_ms": 0.39,
+        "packets_recv": 4048,
+        "packets_lost": 247
+      },
+      {
+        "timestamp": 7.01,
+        "throughput_mbps": 5.504,
+        "loss_pct": 10.61,
+        "avg_latency_ms": 150.91,
+        "jitter_ms": 0.39,
+        "packets_recv": 4385,
+        "packets_lost": 287
+      },
+      {
+        "timestamp": 7.52,
+        "throughput_mbps": 6.013,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 128.1,
+        "jitter_ms": 0.4,
+        "packets_recv": 4753,
+        "packets_lost": 287
+      },
+      {
+        "timestamp": 8.02,
+        "throughput_mbps": 3.125,
+        "loss_pct": 40.87,
+        "avg_latency_ms": 150.14,
+        "jitter_ms": 2.35,
+        "packets_recv": 4944,
+        "packets_lost": 419
+      },
+      {
+        "timestamp": 8.52,
+        "throughput_mbps": 3.11,
+        "loss_pct": 52.26,
+        "avg_latency_ms": 157.41,
+        "jitter_ms": 0.78,
+        "packets_recv": 5134,
+        "packets_lost": 627
+      },
+      {
+        "timestamp": 9.02,
+        "throughput_mbps": 3.042,
+        "loss_pct": 50.66,
+        "avg_latency_ms": 140.61,
+        "jitter_ms": 0.85,
+        "packets_recv": 5320,
+        "packets_lost": 818
+      },
+      {
+        "timestamp": 9.52,
+        "throughput_mbps": 6.675,
+        "loss_pct": 19.21,
+        "avg_latency_ms": 26.5,
+        "jitter_ms": 0.6,
+        "packets_recv": 5728,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 10.04,
+        "throughput_mbps": 5.332,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 31.56,
+        "jitter_ms": 2.35,
+        "packets_recv": 6064,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 10.54,
+        "throughput_mbps": 6.739,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 48.89,
+        "jitter_ms": 0.31,
+        "packets_recv": 6476,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 11.04,
+        "throughput_mbps": 6.142,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 13.6,
+        "jitter_ms": 0.41,
+        "packets_recv": 6851,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 11.54,
+        "throughput_mbps": 6.02,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 7.03,
+        "jitter_ms": 0.31,
+        "packets_recv": 7219,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 12.04,
+        "throughput_mbps": 5.926,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 17.01,
+        "jitter_ms": 0.45,
+        "packets_recv": 7581,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 12.54,
+        "throughput_mbps": 6.065,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 29.58,
+        "jitter_ms": 0.34,
+        "packets_recv": 7952,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 13.04,
+        "throughput_mbps": 5.642,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 8.71,
+        "jitter_ms": 0.51,
+        "packets_recv": 8297,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 13.54,
+        "throughput_mbps": 6.014,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 31.97,
+        "jitter_ms": 0.41,
+        "packets_recv": 8665,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 14.04,
+        "throughput_mbps": 6.345,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 11.42,
+        "jitter_ms": 0.29,
+        "packets_recv": 9053,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 14.54,
+        "throughput_mbps": 5.79,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 13.03,
+        "jitter_ms": 0.75,
+        "packets_recv": 9407,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 15.04,
+        "throughput_mbps": 5.841,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 42.26,
+        "jitter_ms": 0.4,
+        "packets_recv": 9764,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 15.54,
+        "throughput_mbps": 6.184,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 13.0,
+        "jitter_ms": 0.45,
+        "packets_recv": 10142,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 16.05,
+        "throughput_mbps": 5.765,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 19.53,
+        "jitter_ms": 0.59,
+        "packets_recv": 10495,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 16.55,
+        "throughput_mbps": 5.956,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 47.29,
+        "jitter_ms": 0.35,
+        "packets_recv": 10859,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 17.05,
+        "throughput_mbps": 6.46,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 19.96,
+        "jitter_ms": 0.31,
+        "packets_recv": 11254,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 17.55,
+        "throughput_mbps": 6.001,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 2.21,
+        "jitter_ms": 0.48,
+        "packets_recv": 11621,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 18.05,
+        "throughput_mbps": 5.236,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 23.15,
+        "jitter_ms": 0.98,
+        "packets_recv": 11941,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 18.55,
+        "throughput_mbps": 6.097,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 62.21,
+        "jitter_ms": 0.34,
+        "packets_recv": 12314,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 19.05,
+        "throughput_mbps": 5.601,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 60.49,
+        "jitter_ms": 0.91,
+        "packets_recv": 12656,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 19.55,
+        "throughput_mbps": 5.393,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 115.9,
+        "jitter_ms": 0.5,
+        "packets_recv": 12986,
+        "packets_lost": 915
+      },
+      {
+        "timestamp": 20.05,
+        "throughput_mbps": 5.624,
+        "loss_pct": 3.37,
+        "avg_latency_ms": 143.05,
+        "jitter_ms": 0.73,
+        "packets_recv": 13330,
+        "packets_lost": 927
+      },
+      {
+        "timestamp": 20.55,
+        "throughput_mbps": 5.267,
+        "loss_pct": 14.81,
+        "avg_latency_ms": 158.46,
+        "jitter_ms": 0.8,
+        "packets_recv": 13652,
+        "packets_lost": 983
+      },
+      {
+        "timestamp": 21.05,
+        "throughput_mbps": 5.325,
+        "loss_pct": 4.13,
+        "avg_latency_ms": 147.87,
+        "jitter_ms": 0.6,
+        "packets_recv": 13977,
+        "packets_lost": 997
+      },
+      {
+        "timestamp": 21.55,
+        "throughput_mbps": 6.02,
+        "loss_pct": 9.36,
+        "avg_latency_ms": 140.28,
+        "jitter_ms": 0.5,
+        "packets_recv": 14345,
+        "packets_lost": 1035
+      },
+      {
+        "timestamp": 22.06,
+        "throughput_mbps": 6.132,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 122.87,
+        "jitter_ms": 0.48,
+        "packets_recv": 14720,
+        "packets_lost": 1035
+      },
+      {
+        "timestamp": 22.56,
+        "throughput_mbps": 5.506,
+        "loss_pct": 3.44,
+        "avg_latency_ms": 129.34,
+        "jitter_ms": 0.9,
+        "packets_recv": 15057,
+        "packets_lost": 1047
+      },
+      {
+        "timestamp": 23.06,
+        "throughput_mbps": 6.042,
+        "loss_pct": 1.86,
+        "avg_latency_ms": 134.43,
+        "jitter_ms": 0.39,
+        "packets_recv": 15426,
+        "packets_lost": 1054
+      },
+      {
+        "timestamp": 23.56,
+        "throughput_mbps": 6.168,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 117.51,
+        "jitter_ms": 0.51,
+        "packets_recv": 15803,
+        "packets_lost": 1054
+      },
+      {
+        "timestamp": 24.06,
+        "throughput_mbps": 5.502,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 124.85,
+        "jitter_ms": 0.47,
+        "packets_recv": 16140,
+        "packets_lost": 1054
+      },
+      {
+        "timestamp": 24.56,
+        "throughput_mbps": 4.973,
+        "loss_pct": 16.25,
+        "avg_latency_ms": 163.91,
+        "jitter_ms": 0.74,
+        "packets_recv": 16444,
+        "packets_lost": 1113
+      },
+      {
+        "timestamp": 25.19,
+        "throughput_mbps": 0.872,
+        "loss_pct": 9.46,
+        "avg_latency_ms": 178.03,
+        "jitter_ms": 0.64,
+        "packets_recv": 16511,
+        "packets_lost": 1120
+      },
+      {
+        "timestamp": 25.69,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 0.64,
+        "packets_recv": 16511,
+        "packets_lost": 1120
+      },
+      {
+        "timestamp": 26.19,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 0.64,
+        "packets_recv": 16511,
+        "packets_lost": 1120
+      },
+      {
+        "timestamp": 26.69,
+        "throughput_mbps": 0.0,
+        "loss_pct": 0.0,
+        "avg_latency_ms": 0.0,
+        "jitter_ms": 0.64,
+        "packets_recv": 16511,
+        "packets_lost": 1120
+      }
+    ]
+  }
+}
