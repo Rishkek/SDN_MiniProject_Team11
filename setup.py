@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Automated Setup and Prerequisite Installer.
+Automated Setup and Prerequisite Installer for Ubuntu / Linux VM.
 Topic 27: Congestion Detection and Traffic Rerouting.
 
-Behavior:
-- Checks all required system packages and Python libraries.
-- If everything is already installed: seamlessly executes run.py.
-- If anything is missing: installs prerequisites automatically, then executes run.py.
+Installs all system utilities and Python dependencies in a single bulk
+apt-get command using native Ubuntu packages (python3-xyz):
+- mininet, openvswitch-switch, net-tools
+- python3-matplotlib, python3-networkx, python3-pyqt6, python3-tabulate,
+  python3-psutil, python3-pytest, python3-rich
 """
 
 import sys
@@ -15,17 +16,32 @@ import subprocess
 import shutil
 import platform
 
-REQUIRED_PYTHON_MODULES = [
-    ("matplotlib", "matplotlib"),
-    ("networkx", "networkx"),
-    ("tabulate", "tabulate"),
-    ("rich", "rich"),
-    ("psutil", "psutil"),
-    ("pytest", "pytest"),
-    ("PyQt6", "PyQt6")
+# Complete list of native Ubuntu packages (System tools + python3-xyz)
+UBUNTU_BULK_APT_PACKAGES = [
+    "mininet",
+    "openvswitch-switch",
+    "net-tools",
+    "python3-pip",
+    "python3-matplotlib",
+    "python3-networkx",
+    "python3-pyqt6",
+    "python3-tabulate",
+    "python3-psutil",
+    "python3-pytest",
+    "python3-rich"
 ]
 
-LINUX_SYSTEM_PACKAGES = [
+REQUIRED_PYTHON_MODULES = [
+    ("matplotlib", "python3-matplotlib"),
+    ("networkx", "python3-networkx"),
+    ("tabulate", "python3-tabulate"),
+    ("rich", "python3-rich"),
+    ("psutil", "python3-psutil"),
+    ("pytest", "python3-pytest"),
+    ("PyQt6", "python3-pyqt6")
+]
+
+REQUIRED_SYSTEM_TOOLS = [
     ("mn", "mininet"),
     ("ovs-vsctl", "openvswitch-switch"),
     ("ovs-ofctl", "openvswitch-switch"),
@@ -33,124 +49,112 @@ LINUX_SYSTEM_PACKAGES = [
 ]
 
 
-def check_python_modules():
-    """Returns a list of missing Python package names."""
-    missing = []
-    for mod_name, pip_name in REQUIRED_PYTHON_MODULES:
+def check_prerequisites():
+    """Checks if all required Python modules and system commands are available."""
+    missing_modules = []
+    for mod_name, _ in REQUIRED_PYTHON_MODULES:
         try:
             __import__(mod_name)
         except ImportError:
-            missing.append(pip_name)
-    return missing
+            missing_modules.append(mod_name)
+
+    missing_tools = []
+    if platform.system().lower() == "linux":
+        for cmd, _ in REQUIRED_SYSTEM_TOOLS:
+            if shutil.which(cmd) is None:
+                missing_tools.append(cmd)
+
+    return missing_modules, missing_tools
 
 
-def check_linux_system_tools():
-    """Returns a list of missing Linux system apt packages."""
-    if platform.system().lower() != "linux":
-        return []
-    missing_pkgs = []
-    for cmd, pkg in LINUX_SYSTEM_PACKAGES:
-        if shutil.which(cmd) is None and pkg not in missing_pkgs:
-            missing_pkgs.append(pkg)
-    return missing_pkgs
+def install_ubuntu_bulk():
+    """Executes a single bulk sudo apt install command for all packages."""
+    print("\n" + "=" * 65)
+    print(" [*] Executing Bulk Ubuntu Package Installation (apt-get install)")
+    print("=" * 65)
+    print(f" Packages: {' '.join(UBUNTU_BULK_APT_PACKAGES)}\n")
 
-
-def install_python_requirements(missing):
-    """Installs missing Python packages via pip."""
-    print(f"\n[*] Installing missing Python packages: {', '.join(missing)}...")
-    req_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requirements.txt")
-    if os.path.exists(req_file):
-        cmd = [sys.executable, "-m", "pip", "install", "-r", req_file]
-    else:
-        cmd = [sys.executable, "-m", "pip", "install"] + missing
-
-    try:
-        subprocess.check_call(cmd)
-        print("[OK] Python packages installed successfully!")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"[!] Pip installation failed: {e}", file=sys.stderr)
-        return False
-
-
-def install_linux_packages(missing_pkgs):
-    """Installs missing Linux apt packages using sudo if available."""
-    print(f"\n[*] Installing required Linux system packages: {', '.join(missing_pkgs)}...")
     is_root = (os.geteuid() == 0) if hasattr(os, "geteuid") else False
     prefix = [] if is_root else ["sudo"]
 
     try:
-        print("[*] Updating package index (apt update)...")
+        # Step 1: apt-get update
+        print("[*] Running: sudo apt-get update -y...")
         subprocess.check_call(prefix + ["apt-get", "update", "-y"])
-        print(f"[*] Installing packages: {missing_pkgs}...")
-        subprocess.check_call(prefix + ["apt-get", "install", "-y"] + missing_pkgs)
-        # Ensure Open vSwitch service is active
+
+        # Step 2: Bulk apt-get install in one command
+        cmd = prefix + ["apt-get", "install", "-y", "--no-install-recommends"] + UBUNTU_BULK_APT_PACKAGES
+        print(f"\n[*] Running: {' '.join(cmd)}...")
+        subprocess.check_call(cmd)
+
+        # Step 3: Ensure Open vSwitch service is running
+        print("\n[*] Starting Open vSwitch system service...")
         try:
             subprocess.run(prefix + ["service", "openvswitch-switch", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
-        print("[OK] Linux system packages installed successfully!")
+
+        print("\n[OK] Bulk apt package installation completed successfully!")
         return True
+
     except subprocess.CalledProcessError as e:
-        print(f"[!] System package installation failed: {e}", file=sys.stderr)
-        print("[!] Please run manually: sudo apt-get update && sudo apt-get install -y mininet openvswitch-switch net-tools")
+        print(f"\n[!] Bulk apt installation failed with exit code {e.returncode}.", file=sys.stderr)
+        print("[!] Trying pip fallback for any missing Python packages...", file=sys.stderr)
+        try:
+            pip_cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", "matplotlib", "networkx", "PyQt6", "tabulate", "psutil", "pytest", "rich"]
+            subprocess.call(pip_cmd)
+        except Exception:
+            pass
         return False
 
 
 def launch_run_py():
-    """Transitions execution directly to run.py."""
+    """Transitions execution seamlessly to run.py."""
     run_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run.py")
     if not os.path.exists(run_path):
         print(f"[!] Could not locate run.py at {run_path}", file=sys.stderr)
         sys.exit(1)
 
-    print("\n" + "=" * 60)
-    print(" [OK] Ready! Launching application via run.py...")
-    print("=" * 60 + "\n")
-
+    print("\n" + "=" * 65)
+    print(" [OK] All prerequisites satisfied! Launching application via run.py...")
+    print("=" * 65 + "\n")
     sys.stdout.flush()
 
-    # Pass any extra CLI arguments through to run.py
     forward_args = [sys.executable, run_path] + sys.argv[1:]
 
-    # On POSIX (Linux/Mac), use execv for a seamless process replacement
+    # On Linux/macOS, use os.execv for direct process replacement
     if hasattr(os, "execv") and platform.system().lower() != "windows":
         os.execv(sys.executable, forward_args)
     else:
-        # On Windows
         exit_code = subprocess.call(forward_args)
         sys.exit(exit_code)
 
 
 def main():
-    print("=" * 60)
-    print("      SDN Project Setup & Dependency Verification")
+    print("=" * 65)
+    print("      SDN Project Setup & Ubuntu VM Prerequisite Installer")
     print(f"      Platform: {platform.system()} {platform.release()} | Python {platform.python_version()}")
-    print("=" * 60)
+    print("=" * 65)
 
-    missing_py = check_python_modules()
-    missing_linux = check_linux_system_tools()
+    missing_modules, missing_tools = check_prerequisites()
 
-    if not missing_py and not missing_linux:
+    # If already installed, jump straight to run.py
+    if not missing_modules and not missing_tools:
         print("[OK] All system prerequisites and Python packages are already satisfied!")
-        print("[OK] Automatically redirecting to run.py...\n")
+        print("[OK] Automatically launching run.py...\n")
         launch_run_py()
         return
 
-    # Something is missing -> Install
-    if missing_linux:
-        print(f"[!] Missing Linux system utilities: {missing_linux}")
-        install_linux_packages(missing_linux)
+    # If running on Linux (Ubuntu VM), run bulk apt install
+    if platform.system().lower() == "linux":
+        print(f"[!] Missing detected: Modules={missing_modules}, Tools={missing_tools}")
+        install_ubuntu_bulk()
+    else:
+        # Windows fallback: install via pip
+        print("[*] Running on Windows. Installing Python packages via pip...")
+        subprocess.call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
-    if missing_py:
-        print(f"[!] Missing Python libraries: {missing_py}")
-        install_python_requirements(missing_py)
-
-    # Re-verify
-    re_missing_py = check_python_modules()
-    if re_missing_py:
-        print(f"[!] Warning: Some Python packages still missing: {re_missing_py}")
-
+    # Launch run.py
     launch_run_py()
 
 
