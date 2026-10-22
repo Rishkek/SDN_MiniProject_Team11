@@ -75,12 +75,19 @@ git clone <your-github-repo-url>
 cd "CN_project_congestion and traffic rerouting"
 ```
 
-### Step 2: One-Click Setup & Run
-Run `setup.py`. It inspects your operating system, automatically installs any missing dependencies (system packages or pip modules), and immediately launches `run.py`:
+### Step 2: One-Click Setup & Launch (Ubuntu VM)
+Run `setup.py` with `sudo`. It automatically runs the bulk Ubuntu `apt-get` installation for all tools and `python3-*` packages, then immediately launches the GUI dashboard via `run.py`:
 ```bash
-python3 setup.py
+sudo python3 setup.py
 ```
-> **Note:** If all prerequisites are already satisfied, `setup.py` skips re-installation and directly transitions into `run.py`!
+
+#### Manual 1-Line Bulk Install (Alternative):
+If you prefer installing all packages manually in Ubuntu terminal before running:
+```bash
+sudo apt-get update && sudo apt-get install -y mininet openvswitch-switch net-tools python3-pip python3-matplotlib python3-networkx python3-pyqt6 python3-tabulate python3-psutil python3-pytest python3-rich
+python3 run.py
+```
+> **Note:** If all prerequisites are already satisfied, `setup.py` detects them and directly transitions into `run.py`!
 
 ---
 
