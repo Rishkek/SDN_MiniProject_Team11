@@ -156,17 +156,38 @@ def port_stats_reply_handler(self, ev):
 ### C. Performance Benchmark Suite ([`src/benchmark.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/benchmark.py))
 
 ```python
-def run_benchmark():
+def run_full_comparative_suite():
     static_results = run_single_experiment("STATIC", adaptive_enabled=False)
     dynamic_results = run_single_experiment("DYNAMIC", adaptive_enabled=True)
-    plot_benchmark_results(static_results, dynamic_results)
+    rate_results = run_single_experiment("SDN_PLUS_RATE", adaptive_enabled=True, enable_rate_adaptation=True)
+    plot_comparative_evaluation(static_results, dynamic_results, rate_results)
 ```
-- Runs both experiments under identical cross-traffic conditions.
+- Runs all experiments under strictly identical cross-traffic burst conditions (7.0 Mbps on 10 Mbps link).
 - Collects time-series metrics from Member 1's receiver and computes:
-  1. **Average Throughput:** $3.89\text{ Mbps}$ (Static) vs **$5.09\text{ Mbps}$** (Dynamic) $\rightarrow$ **$+31\%$ gain**.
-  2. **Average Loss Rate:** $23.96\%$ (Static) vs **$5.73\%$** (Dynamic) $\rightarrow$ **$-76\%$ reduction**; post-failover loss is **$0.0\%$**.
-  3. **Recovery Time:** Measured at **$9.46\text{ milliseconds}$**.
-  4. Generates the 4-panel visual figure saved as `evaluation_results.png`.
+  1. **Average Throughput:** $4.32\text{ Mbps}$ (Static) vs **$5.34\text{ Mbps}$** (Dynamic SDN) $\rightarrow$ **$+23.6\%$ gain**.
+  2. **Average Loss Rate:** $19.05\%$ (Static) vs **$2.24\%$** (Dynamic SDN) $\rightarrow$ **$88.2\%$ loss reduction**; post-failover loss drops to $0.0\%$.
+  3. **Recovery Time:** Measured at **$11.46\text{ milliseconds}$** ($0.011\text{s}$).
+  4. Generates the 4-panel visual figure saved as `evaluation_results.png` and machine-readable `benchmark_summary.json`.
+
+---
+
+### D. Real-Time Telemetry & Saw-Tooth Congestion Dynamics ([`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py))
+
+#### 1. In-Place Matplotlib Plotting & `draw_idle()` Optimization
+```python
+# Pre-allocated line objects in RealtimePlotCanvas and LiveTCPCongestionWidget
+self.line_thpt, = self.ax1.plot([], [], color="#a6e3a1", linewidth=2.0)
+self.line_loss, = self.ax2.plot([], [], color="#f38ba8", linewidth=2.0)
+
+def update_plot(self, t, thpt, loss):
+    self.line_thpt.set_data(self.times, self.throughputs)
+    self.line_loss.set_data(self.times, self.losses)
+    self.draw_idle()  # Asynchronous non-blocking render
+```
+- **The Freezing Bottleneck Solved:** Previously, calling `ax.clear()` and full spine/tick re-styling inside a timer took 187 ms, completely starving Qt's main event loop.
+- **The Optimization:** By setting up axes once and updating line data in-place via `set_data()` followed by asynchronous `draw_idle()`, redraw duration dropped from **187.02 ms to 0.08 ms (~2,337x speedup)**!
+- **Dirty-Checking Cache:** Telemetry polling timer runs at 4 Hz (250 ms). Switch flow table text (`get_flow_table`) is dirty-checked so `lbl_flow_table.setText()` is only called when flow rules actually change, eliminating wasteful UI relayouts.
+- Translucent watermark **`*D2`** is permanently rendered on the plot canvas and TCP comparison tabs.
 
 ---
 

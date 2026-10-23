@@ -10,13 +10,14 @@ import json
 import argparse
 import threading
 import sys
-from typing import Optional, List, Dict, Any
+from collections import deque
+from typing import Optional, List, Dict, Any, Deque
 
 try:
-    from src.protocol import unpack_packet, InvalidPacketError, FLAG_START, FLAG_FIN, FLAG_DATA
+    from src.protocol import unpack_packet, pack_feedback, InvalidPacketError, FLAG_START, FLAG_FIN, FLAG_DATA
     from src.config import MAIN_UDP_PORT
 except ImportError:
-    from protocol import unpack_packet, InvalidPacketError, FLAG_START, FLAG_FIN, FLAG_DATA
+    from protocol import unpack_packet, pack_feedback, InvalidPacketError, FLAG_START, FLAG_FIN, FLAG_DATA
     from config import MAIN_UDP_PORT
 
 
@@ -27,10 +28,17 @@ class UDPReceiver:
     and exposes live telemetry for congestion monitoring.
     """
 
-    def __init__(self, bind_ip: str = "0.0.0.0", bind_port: int = MAIN_UDP_PORT, log_file: Optional[str] = None):
+    def __init__(
+        self,
+        bind_ip: str = "0.0.0.0",
+        bind_port: int = MAIN_UDP_PORT,
+        log_file: Optional[str] = None,
+        feedback_target: Optional[tuple] = None
+    ):
         self.bind_ip = bind_ip
         self.bind_port = bind_port
         self.log_file = log_file
+        self.feedback_target = feedback_target  # (ip, port) to send feedback datagrams
 
         self._sock: Optional[socket.socket] = None
         self._running = False
@@ -39,6 +47,7 @@ class UDPReceiver:
         # Cumulative metrics
         self.total_packets_received = 0
         self.total_bytes_received = 0
+        self.total_payload_bytes_received = 0
         self.total_packets_lost = 0
         self.out_of_order_packets = 0
         self.expected_seq = 0
@@ -49,12 +58,13 @@ class UDPReceiver:
         self.jitter_ms = 0.0
         self.prev_transit_ms = None
 
-        # Latency statistics
-        self.latencies_ms: List[float] = []
+        # Latency statistics (Bounded circular ring buffer prevents memory leaks)
+        self.latencies_ms: Deque[float] = deque(maxlen=2000)
 
-        # Rolling window telemetry (updated every snapshot interval)
-        self.history: List[Dict[str, Any]] = []
+        # Rolling window telemetry (Bounded circular history prevents memory growth)
+        self.history: Deque[Dict[str, Any]] = deque(maxlen=500)
         self._window_bytes = 0
+        self._window_payload_bytes = 0
         self._window_lost = 0
         self._window_received = 0
         self._window_latencies: List[float] = []
@@ -117,16 +127,21 @@ class UDPReceiver:
 
             with self._lock:
                 pkt_len = len(data)
+                payload_len = len(payload)
                 self.total_packets_received += 1
                 self.total_bytes_received += pkt_len
+                self.total_payload_bytes_received += payload_len
                 self._window_bytes += pkt_len
+                self._window_payload_bytes += payload_len
                 self._window_received += 1
                 self.last_packet_time = recv_time
 
-                # Latency in milliseconds
+                # Latency in milliseconds (sender timestamp vs receiver arrival)
                 delay_ms = max(0.0, (recv_time - send_time) * 1000.0)
-                self.latencies_ms.append(delay_ms)
-                self._window_latencies.append(delay_ms)
+                # Filter out absurd clock-skew artifacts if clocks are wildly out of sync (> 60s)
+                if delay_ms < 60000.0:
+                    self.latencies_ms.append(delay_ms)
+                    self._window_latencies.append(delay_ms)
 
                 # RFC 3550 Jitter calculation: D(i,j) = (Rj - Sj) - (Ri - Si)
                 transit_ms = (recv_time - send_time) * 1000.0
@@ -156,14 +171,21 @@ class UDPReceiver:
         delta = current_time - self._last_window_time
         if delta >= 0.5:  # 500ms sliding telemetry window
             total_expected_in_win = self._window_received + self._window_lost
-            loss_pct = (self._window_lost / total_expected_in_win * 100.0) if total_expected_in_win > 0 else 0.0
+            window_loss_pct = (self._window_lost / total_expected_in_win * 100.0) if total_expected_in_win > 0 else 0.0
             throughput_mbps = (self._window_bytes * 8.0) / (delta * 1_000_000.0)
+            goodput_mbps = (self._window_payload_bytes * 8.0) / (delta * 1_000_000.0)
             avg_lat = sum(self._window_latencies) / len(self._window_latencies) if self._window_latencies else 0.0
+
+            total_pkts = self.total_packets_received + self.total_packets_lost
+            overall_loss_pct = (self.total_packets_lost / total_pkts * 100.0) if total_pkts > 0 else 0.0
 
             snapshot = {
                 "timestamp": round(current_time - (self.start_time or current_time), 2),
                 "throughput_mbps": round(throughput_mbps, 3),
-                "loss_pct": round(loss_pct, 2),
+                "goodput_mbps": round(goodput_mbps, 3),
+                "loss_pct": round(window_loss_pct, 2),
+                "window_loss_pct": round(window_loss_pct, 2),
+                "overall_loss_pct": round(overall_loss_pct, 2),
                 "avg_latency_ms": round(avg_lat, 2),
                 "jitter_ms": round(self.jitter_ms, 2),
                 "packets_recv": self.total_packets_received,
@@ -171,8 +193,18 @@ class UDPReceiver:
             }
             self.history.append(snapshot)
 
+            # Send feedback datagram if feedback channel is active
+            if self.feedback_target and self._sock:
+                try:
+                    suggested_rate = max(1.5, throughput_mbps * (0.75 if window_loss_pct > 3.0 else 1.05))
+                    fb = pack_feedback(window_loss_pct, throughput_mbps, avg_lat, suggested_rate)
+                    self._sock.sendto(fb, self.feedback_target)
+                except OSError:
+                    pass
+
             # Reset window
             self._window_bytes = 0
+            self._window_payload_bytes = 0
             self._window_lost = 0
             self._window_received = 0
             self._window_latencies = []
@@ -187,7 +219,10 @@ class UDPReceiver:
                 latest = {
                     "timestamp": 0.0,
                     "throughput_mbps": 0.0,
+                    "goodput_mbps": 0.0,
                     "loss_pct": 0.0,
+                    "window_loss_pct": 0.0,
+                    "overall_loss_pct": 0.0,
                     "avg_latency_ms": 0.0,
                     "jitter_ms": 0.0,
                     "packets_recv": self.total_packets_received,
@@ -198,19 +233,22 @@ class UDPReceiver:
             latest["out_of_order"] = self.out_of_order_packets
             total_pkts = self.total_packets_received + self.total_packets_lost
             latest["overall_loss_pct"] = round((self.total_packets_lost / total_pkts * 100.0) if total_pkts > 0 else 0.0, 2)
+            latest["window_loss_pct"] = latest.get("loss_pct", 0.0)
 
-            # Cumulative overall throughput across entire active duration
+            # Cumulative overall throughput & goodput across entire active duration
             now = self.last_packet_time if self.last_packet_time > self.start_time else time.time()
             active_duration = max(0.001, now - (self.start_time or now))
             overall_mbps = (self.total_bytes_received * 8.0) / (active_duration * 1_000_000.0)
+            overall_goodput = (self.total_payload_bytes_received * 8.0) / (active_duration * 1_000_000.0)
             latest["overall_throughput_mbps"] = round(overall_mbps, 3)
+            latest["overall_goodput_mbps"] = round(overall_goodput, 3)
 
             return latest
 
     def export_history_to_file(self, filepath: str):
         """Dumps collected telemetry history into a JSON file."""
         with open(filepath, "w") as f:
-            json.dump(self.history, f, indent=2)
+            json.dump(list(self.history), f, indent=2)
 
 
 def main():

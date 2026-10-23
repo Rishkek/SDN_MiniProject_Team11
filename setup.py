@@ -21,6 +21,8 @@ UBUNTU_BULK_APT_PACKAGES = [
     "mininet",
     "openvswitch-switch",
     "net-tools",
+    "iperf",
+    "tcpdump",
     "python3-pip",
     "python3-matplotlib",
     "python3-networkx",

@@ -18,7 +18,8 @@ import time
 import math
 import random
 import threading
-from typing import Optional, List, Dict, Any
+from collections import deque
+from typing import Optional, List, Dict, Any, Deque
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -48,7 +49,7 @@ from src.protocol import FLOW_MAIN, FLOW_CROSS
 
 class PacketDot:
     """Represents an animated packet moving along a link."""
-    def __init__(self, path: str, color: QColor, speed: float = 0.02):
+    def __init__(self, path: str, color: QColor, speed: float = 0.015):
         self.path = path  # 'main_a', 'main_b', 'cross_a'
         self.color = color
         self.progress = 0.0  # 0.0 to 1.0
@@ -58,7 +59,7 @@ class PacketDot:
 class AnimatedTopologyCanvas(QWidget):
     """
     Renders the live Diamond Topology with:
-    - Moving animated packet dots on active paths
+    - Moving animated packet dots on active paths (60 FPS smooth rendering)
     - Link queue buffer fill gauges (0 to 100%)
     - Active path highlighting
     - Real-time Switch S1 OpenFlow 1.3 Flow Table inspector
@@ -79,7 +80,39 @@ class AnimatedTopologyCanvas(QWidget):
         self.packets: List[PacketDot] = []
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self._step_animation)
-        self.anim_timer.start(33)  # ~30 FPS
+        self.anim_timer.start(16)  # ~60 FPS smooth rendering
+
+        # Pre-allocated visual assets to eliminate GC churn and Qt font lookups in paintEvent
+        self._font_regular_7 = QFont("Segoe UI", 7)
+        self._font_bold_7 = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        self._font_bold_8 = QFont("Segoe UI", 8, QFont.Weight.Bold)
+        self._font_bold_9 = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        self._pen_node = QPen(QColor("#cdd6f4"), 2)
+        self._pen_q_border = QPen(QColor("#585b70"), 1)
+        self._pen_wm = QPen(QColor(205, 214, 244, 75))
+        self._brush_q_bg = QBrush(QColor("#313244"))
+        self._brush_q_pink = QBrush(QColor("#f38ba8"))
+        self._brush_q_yellow = QBrush(QColor("#f9e2af"))
+        self._brush_q_green = QBrush(QColor("#a6e3a1"))
+        self._color_bg = QColor("#181825")
+        self._color_text_white = QColor("#ffffff")
+        self._color_text_dim = QColor("#a6adc8")
+        self._color_text_alert = QColor("#f38ba8")
+        self._color_text_normal = QColor("#cdd6f4")
+        self._color_h1 = QColor("#1e66f5")
+        self._color_h3 = QColor("#e64553")
+        self._color_h2 = QColor("#40a02b")
+        self._color_h4 = QColor("#df8e1d")
+        self._color_switch = QColor("#313244")
+        self._color_path_idle = QColor("#45475a")
+        self._color_path_green = QColor("#a6e3a1")
+        self._color_path_red = QColor("#f38ba8")
+        self._pen_link_h1 = QPen(QColor("#89b4fa"), 2)
+        self._pen_link_h3 = QPen(QColor("#f38ba8"), 2)
+        self._pen_link_h2 = QPen(QColor("#89b4fa"), 2)
+        self._pen_link_h4 = QPen(QColor("#f38ba8"), 2)
+        self._dot_color_main = QColor("#89b4fa")
+        self._dot_color_cross = QColor("#f38ba8")
 
     def update_state(self, active_path: str, load_a: float, load_b: float, congested: bool,
                      q_occupancy: float, q_limit: int, main_active: bool, cross_active: bool):
@@ -93,13 +126,13 @@ class AnimatedTopologyCanvas(QWidget):
         self.flow_cross_active = cross_active
 
     def _step_animation(self):
-        # Spawn new packets if streams are running
-        if self.flow_main_active and random.random() < 0.4:
+        # Spawn new packets if streams are running (adjusted for ~60 FPS rate)
+        if self.flow_main_active and random.random() < 0.22:
             p_type = 'main_b' if self.active_path == PATH_ALTERNATE else 'main_a'
-            self.packets.append(PacketDot(p_type, QColor("#89b4fa"), speed=0.025))
+            self.packets.append(PacketDot(p_type, self._dot_color_main, speed=0.015))
 
-        if self.flow_cross_active and random.random() < 0.45:
-            self.packets.append(PacketDot('cross_a', QColor("#f38ba8"), speed=0.025))
+        if self.flow_cross_active and random.random() < 0.25:
+            self.packets.append(PacketDot('cross_a', self._dot_color_cross, speed=0.015))
 
         # Advance packets
         surviving = []
@@ -115,7 +148,7 @@ class AnimatedTopologyCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Background
-        painter.fillRect(self.rect(), QColor("#181825"))
+        painter.fillRect(self.rect(), self._color_bg)
 
         w = self.width()
         h = self.height()
@@ -131,26 +164,28 @@ class AnimatedTopologyCanvas(QWidget):
         pos_h4 = (int(w * 0.92), int(h * 0.72))
 
         # Helper to draw link
-        def draw_link(p1, p2, color, thickness=3, label=None, alert=False):
-            pen = QPen(color, thickness)
-            painter.setPen(pen)
+        def draw_link(p1, p2, pen_or_color, thickness=3, label=None, alert=False):
+            if isinstance(pen_or_color, QPen):
+                painter.setPen(pen_or_color)
+            else:
+                painter.setPen(QPen(pen_or_color, thickness))
             painter.drawLine(p1[0], p1[1], p2[0], p2[1])
             if label:
                 mid_x = (p1[0] + p2[0]) // 2
                 mid_y = (p1[1] + p2[1]) // 2
-                painter.setPen(QColor("#f38ba8" if alert else "#cdd6f4"))
-                painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+                painter.setPen(self._color_text_alert if alert else self._color_text_normal)
+                painter.setFont(self._font_bold_8)
                 painter.drawText(mid_x - 45, mid_y - 8, label)
 
         # Draw base links
-        draw_link(pos_h1, pos_s1, QColor("#89b4fa"), 2, "H1->S1")
-        draw_link(pos_h3, pos_s1, QColor("#f38ba8"), 2, "H3->S1")
-        draw_link(pos_s4, pos_h2, QColor("#89b4fa"), 2, "S4->H2")
-        draw_link(pos_s4, pos_h4, QColor("#f38ba8"), 2, "S4->H4")
+        draw_link(pos_h1, pos_s1, self._pen_link_h1, 2, "H1->S1")
+        draw_link(pos_h3, pos_s1, self._pen_link_h3, 2, "H3->S1")
+        draw_link(pos_s4, pos_h2, self._pen_link_h2, 2, "S4->H2")
+        draw_link(pos_s4, pos_h4, self._pen_link_h4, 2, "S4->H4")
 
         # Path A links (S1->S2->S4)
         is_path_a_active = (self.active_path == PATH_PRIMARY)
-        color_a = QColor("#f38ba8") if self.is_congested else (QColor("#a6e3a1") if is_path_a_active else QColor("#45475a"))
+        color_a = self._color_path_red if self.is_congested else (self._color_path_green if is_path_a_active else self._color_path_idle)
         thick_a = 5 if is_path_a_active or self.flow_cross_active else 2
         label_a = f"Path A: {self.path_a_load:.1f}M " + ("[CONGESTED]" if self.is_congested else "")
         draw_link(pos_s1, pos_s2, color_a, thick_a, label_a, alert=self.is_congested)
@@ -158,7 +193,7 @@ class AnimatedTopologyCanvas(QWidget):
 
         # Path B links (S1->S3->S4)
         is_path_b_active = (self.active_path == PATH_ALTERNATE)
-        color_b = QColor("#a6e3a1") if is_path_b_active else QColor("#45475a")
+        color_b = self._color_path_green if is_path_b_active else self._color_path_idle
         thick_b = 5 if is_path_b_active else 2
         label_b = f"Path B: {self.path_b_load:.1f}M " + ("[REROUTED]" if is_path_b_active else "[IDLE]")
         draw_link(pos_s1, pos_s3, color_b, thick_b, label_b)
@@ -167,23 +202,23 @@ class AnimatedTopologyCanvas(QWidget):
         # Draw Queue Meter on Path A
         q_box_x = int(w * 0.38)
         q_box_y = int(h * 0.12)
-        painter.setBrush(QBrush(QColor("#313244")))
-        painter.setPen(QPen(QColor("#585b70"), 1))
+        painter.setBrush(self._brush_q_bg)
+        painter.setPen(self._pen_q_border)
         painter.drawRect(q_box_x, q_box_y, 110, 14)
         fill_w = int(110 * (self.queue_occupancy / 100.0))
-        q_color = QColor("#f38ba8") if self.queue_occupancy > 80 else (QColor("#f9e2af") if self.queue_occupancy > 50 else QColor("#a6e3a1"))
-        painter.fillRect(q_box_x, q_box_y, fill_w, 14, QBrush(q_color))
-        painter.setPen(QColor("#ffffff"))
-        painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+        q_brush = self._brush_q_pink if self.queue_occupancy > 80 else (self._brush_q_yellow if self.queue_occupancy > 50 else self._brush_q_green)
+        painter.fillRect(q_box_x, q_box_y, fill_w, 14, q_brush)
+        painter.setPen(self._color_text_white)
+        painter.setFont(self._font_bold_7)
         painter.drawText(q_box_x + 6, q_box_y + 11, f"Queue: {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts")
 
         # Draw Animated Packets moving along links
         def get_pos_on_segment(p1, p2, prog):
             return (p1[0] + (p2[0] - p1[0]) * prog, p1[1] + (p2[1] - p1[1]) * prog)
 
+        painter.setPen(Qt.PenStyle.NoPen)
         for p in self.packets:
             painter.setBrush(QBrush(p.color))
-            painter.setPen(Qt.PenStyle.NoPen)
             if p.path == 'main_a':
                 # S1 -> S2 (0.0 - 0.5), S2 -> S4 (0.5 - 1.0)
                 if p.progress < 0.5:
@@ -207,65 +242,52 @@ class AnimatedTopologyCanvas(QWidget):
         def draw_node(pos, text, subtext, bg_color, is_switch=False):
             rad = 22 if is_switch else 18
             painter.setBrush(QBrush(bg_color))
-            painter.setPen(QPen(QColor("#cdd6f4"), 2))
+            painter.setPen(self._pen_node)
             if is_switch:
                 painter.drawRect(pos[0] - rad, pos[1] - rad, rad * 2, rad * 2)
             else:
                 painter.drawEllipse(pos[0] - rad, pos[1] - rad, rad * 2, rad * 2)
 
-            painter.setPen(QColor("#ffffff"))
-            painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            painter.setPen(self._color_text_white)
+            painter.setFont(self._font_bold_9)
             painter.drawText(pos[0] - rad, pos[1] - rad, rad * 2, rad * 2, Qt.AlignmentFlag.AlignCenter, text)
 
-            painter.setPen(QColor("#a6adc8"))
-            painter.setFont(QFont("Segoe UI", 7))
+            painter.setPen(self._color_text_dim)
+            painter.setFont(self._font_regular_7)
             painter.drawText(pos[0] - 30, pos[1] + rad + 12, subtext)
 
         # Draw Hosts
-        draw_node(pos_h1, "H1", "10.0.0.1", QColor("#1e66f5"))
-        draw_node(pos_h3, "H3", "10.0.0.3", QColor("#e64553"))
-        draw_node(pos_h2, "H2", "10.0.0.2", QColor("#40a02b"))
-        draw_node(pos_h4, "H4", "10.0.0.4", QColor("#df8e1d"))
+        draw_node(pos_h1, "H1", "10.0.0.1", self._color_h1)
+        draw_node(pos_h3, "H3", "10.0.0.3", self._color_h3)
+        draw_node(pos_h2, "H2", "10.0.0.2", self._color_h2)
+        draw_node(pos_h4, "H4", "10.0.0.4", self._color_h4)
 
         # Draw Switches
-        draw_node(pos_s1, "S1", "Ingress", QColor("#313244"), is_switch=True)
-        draw_node(pos_s2, "S2", "Primary", QColor("#313244"), is_switch=True)
-        draw_node(pos_s3, "S3", "Backup", QColor("#313244"), is_switch=True)
-        draw_node(pos_s4, "S4", "Egress", QColor("#313244"), is_switch=True)
+        draw_node(pos_s1, "S1", "Ingress", self._color_switch, is_switch=True)
+        draw_node(pos_s2, "S2", "Primary", self._color_switch, is_switch=True)
+        draw_node(pos_s3, "S3", "Backup", self._color_switch, is_switch=True)
+        draw_node(pos_s4, "S4", "Egress", self._color_switch, is_switch=True)
 
         # Translucent Watermark: *D1 (Problem Understanding & Mininet/SDN Topology)
-        painter.setPen(QColor(205, 214, 244, 75))
-        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        painter.setPen(self._pen_wm)
+        painter.setFont(self._font_bold_8)
         painter.drawText(w - 38, h - 8, "*D1")
 
 
 class RealtimePlotCanvas(FigureCanvas):
-    """Matplotlib FigureCanvas for live throughput and packet loss plotting."""
+    """Matplotlib FigureCanvas for live throughput and packet loss plotting (Optimized)."""
 
     def __init__(self, parent=None):
         self.fig = Figure(figsize=(6, 3), dpi=85, facecolor="#1e1e2e")
         super().__init__(self.fig)
         self.ax1 = self.fig.add_subplot(2, 1, 1)
         self.ax2 = self.fig.add_subplot(2, 1, 2)
-        self.fig.tight_layout()
 
-        self.times = []
-        self.throughputs = []
-        self.losses = []
+        self.times: Deque[float] = deque(maxlen=70)
+        self.throughputs: Deque[float] = deque(maxlen=70)
+        self.losses: Deque[float] = deque(maxlen=70)
 
-    def update_plot(self, t, thpt, loss):
-        self.times.append(t)
-        self.throughputs.append(thpt)
-        self.losses.append(loss)
-
-        if len(self.times) > 70:
-            self.times.pop(0)
-            self.throughputs.pop(0)
-            self.losses.pop(0)
-
-        self.ax1.clear()
-        self.ax2.clear()
-
+        # Pre-configure axes once to eliminate costly re-initialization on every tick
         for ax in [self.ax1, self.ax2]:
             ax.set_facecolor("#181825")
             ax.grid(True, linestyle="--", alpha=0.3, color="#6c7086")
@@ -273,21 +295,39 @@ class RealtimePlotCanvas(FigureCanvas):
             for spine in ax.spines.values():
                 spine.set_color("#45475a")
 
-        self.ax1.plot(self.times, self.throughputs, color="#a6e3a1", linewidth=2.0)
         self.ax1.set_ylabel("Mbps", color="#cdd6f4", fontsize=8)
         self.ax1.set_ylim(0, 10)
         self.ax1.set_title("Live UDP Throughput (Mbps)", color="#cdd6f4", fontsize=9, fontweight="bold")
+        self.line_thpt, = self.ax1.plot([], [], color="#a6e3a1", linewidth=2.0)
 
-        self.ax2.plot(self.times, self.losses, color="#f38ba8", linewidth=2.0)
         self.ax2.set_ylabel("Loss %", color="#cdd6f4", fontsize=8)
         self.ax2.set_xlabel("Time (s)", color="#cdd6f4", fontsize=8)
         self.ax2.set_ylim(-2, 70)
         self.ax2.set_title("Live Packet Loss Rate (%)", color="#cdd6f4", fontsize=9, fontweight="bold")
+        self.line_loss, = self.ax2.plot([], [], color="#f38ba8", linewidth=2.0)
+
         # Translucent Watermark: *D2 (Dynamic SDN Performance Telemetry)
         self.ax2.text(0.98, 0.08, "*D2", transform=self.ax2.transAxes, color="#6c7086", alpha=0.45, fontsize=8, fontweight="bold", ha="right")
 
         self.fig.tight_layout()
-        self.draw()
+
+    def update_plot(self, t: float, thpt: float, loss: float):
+        self.times.append(t)
+        self.throughputs.append(thpt)
+        self.losses.append(loss)
+
+        # High-performance in-place line data updates (avoids rebuilding axes/spines/labels)
+        self.line_thpt.set_data(self.times, self.throughputs)
+        self.line_loss.set_data(self.times, self.losses)
+
+        if self.times:
+            xmin = self.times[0]
+            xmax = max(self.times[-1], xmin + 1.0)
+            self.ax1.set_xlim(xmin, xmax)
+            self.ax2.set_xlim(xmin, xmax)
+
+        # Asynchronous non-blocking canvas update
+        self.draw_idle()
 
 
 class LiveTCPCongestionWidget(QWidget):
@@ -299,6 +339,11 @@ class LiveTCPCongestionWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+
+        # Educational Scope Banner
+        scope_banner = QLabel("📌 [Interactive Educational Model] Demonstrates transport-layer host backoff (Tahoe drop-to-1, Reno halving, CUBIC cubic growth) versus infrastructure-level SDN dynamic traffic rerouting (loss averted before CWND collapse).")
+        scope_banner.setStyleSheet("color: #fab387; font-size: 10px; font-style: italic; padding: 2px 6px; background: #181825; border-radius: 4px;")
+        layout.addWidget(scope_banner)
 
         # Top Control Bar
         top_bar = QFrame()
@@ -313,6 +358,7 @@ class LiveTCPCongestionWidget(QWidget):
             "Solo Focus: TCP CUBIC (RFC 8312 Linux Default)",
             "Solo Focus: SDN Dynamic Rerouting (Zero CWND Collapse)"
         ])
+        self.combo_mode.currentIndexChanged.connect(self._on_mode_changed)
         t_layout.addWidget(QLabel("Simulation Mode:"))
         t_layout.addWidget(self.combo_mode)
 
@@ -361,11 +407,21 @@ class LiveTCPCongestionWidget(QWidget):
 
         layout.addWidget(readouts)
 
-        # Matplotlib Live Saw-Tooth Plot
+        # Matplotlib Live Saw-Tooth Plot (Optimized for instant non-blocking render)
         self.fig = Figure(figsize=(8, 4), dpi=95, facecolor="#1e1e2e")
         self.canvas = FigureCanvas(self.fig)
         self.ax = self.fig.add_subplot(1, 1, 1)
         self.ax.set_facecolor("#181825")
+        self.ax.grid(True, linestyle="--", alpha=0.3, color="#6c7086")
+        self.ax.tick_params(colors="#cdd6f4")
+        for spine in self.ax.spines.values():
+            spine.set_color("#45475a")
+
+        self.ax.set_title("Live Transport-Layer CWND Saw-Tooth Dynamics", color="#cdd6f4", fontsize=11, fontweight="bold")
+        self.ax.set_xlabel("Transmission Time (seconds / RTTs)", color="#cdd6f4", fontsize=10)
+        self.ax.set_ylabel("Congestion Window (cwnd in MSS)", color="#cdd6f4", fontsize=10)
+        self.ax.set_ylim(0, 55)
+
         layout.addWidget(self.canvas, stretch=6)
 
         # Scrolling Event Log
@@ -384,6 +440,18 @@ class LiveTCPCongestionWidget(QWidget):
         self.rtt = 0.05  # 50ms RTT
         self.pipe_capacity = 36.0  # Buffer ceiling
 
+        # Capacity line
+        self.line_capacity = self.ax.axhline(self.pipe_capacity, color="#f9e2af", linestyle=":", label=f"Bottleneck Capacity ({int(self.pipe_capacity)} pkts)")
+
+        # Pre-allocate line artists
+        self.line_tahoe, = self.ax.plot([], [], label="TCP Tahoe (Drop to 1)", color="#f38ba8", linestyle="--", linewidth=2.0)
+        self.line_reno, = self.ax.plot([], [], label="TCP Reno (Fast Recovery)", color="#89b4fa", linewidth=2.0)
+        self.line_cubic, = self.ax.plot([], [], label="TCP CUBIC (Linux Default)", color="#cba6f7", linewidth=2.5)
+        self.line_sdn, = self.ax.plot([], [], label="SDN Dynamic Rerouting", color="#a6e3a1", linewidth=3.0)
+
+        self.legend = self.ax.legend(facecolor="#1e1e2e", edgecolor="#45475a", labelcolor="#cdd6f4", loc="upper left", fontsize=8)
+        self.fig.tight_layout()
+
         # States for Tahoe, Reno, Cubic, SDN
         self.cwnd_tahoe = 1.0
         self.ssthresh_tahoe = 24.0
@@ -399,14 +467,17 @@ class LiveTCPCongestionWidget(QWidget):
         self.cwnd_sdn = 1.0
         self.ssthresh_sdn = 40.0
 
-        # Data history for plot
-        self.hist_time = []
-        self.hist_tahoe = []
-        self.hist_reno = []
-        self.hist_cubic = []
-        self.hist_sdn = []
+        # Bounded deques for plot data history
+        self.hist_time: Deque[float] = deque(maxlen=120)
+        self.hist_tahoe: Deque[float] = deque(maxlen=120)
+        self.hist_reno: Deque[float] = deque(maxlen=120)
+        self.hist_cubic: Deque[float] = deque(maxlen=120)
+        self.hist_sdn: Deque[float] = deque(maxlen=120)
 
         self._reset_sim()
+
+    def _on_mode_changed(self, idx: int):
+        self._redraw_plot()
 
     def _toggle_sim(self):
         if self.sim_running:
@@ -441,11 +512,17 @@ class LiveTCPCongestionWidget(QWidget):
         self.cwnd_sdn = 1.0
         self.ssthresh_sdn = 40.0
 
-        self.hist_time = [0.0]
-        self.hist_tahoe = [1.0]
-        self.hist_reno = [1.0]
-        self.hist_cubic = [1.0]
-        self.hist_sdn = [1.0]
+        self.hist_time.clear()
+        self.hist_tahoe.clear()
+        self.hist_reno.clear()
+        self.hist_cubic.clear()
+        self.hist_sdn.clear()
+
+        self.hist_time.append(0.0)
+        self.hist_tahoe.append(1.0)
+        self.hist_reno.append(1.0)
+        self.hist_cubic.append(1.0)
+        self.hist_sdn.append(1.0)
 
         self.event_log.clear()
         self.event_log.append("[SYSTEM] Simulation initialized. Pipe capacity: 36 MSS. Press Start.")
@@ -516,20 +593,12 @@ class LiveTCPCongestionWidget(QWidget):
                 self.cwnd_sdn += (1.0 / self.cwnd_sdn)
             self.cwnd_sdn = min(50.0, self.cwnd_sdn)
 
-        # Record history
+        # Record history in bounded circular buffers
         self.hist_time.append(round(self.t_sim, 2))
         self.hist_tahoe.append(round(self.cwnd_tahoe, 2))
         self.hist_reno.append(round(self.cwnd_reno, 2))
         self.hist_cubic.append(round(self.cwnd_cubic, 2))
         self.hist_sdn.append(round(self.cwnd_sdn, 2))
-
-        # Keep rolling 120 points
-        if len(self.hist_time) > 120:
-            self.hist_time.pop(0)
-            self.hist_tahoe.pop(0)
-            self.hist_reno.pop(0)
-            self.hist_cubic.pop(0)
-            self.hist_sdn.pop(0)
 
         # Update labels
         self.lbl_tahoe_val.setText(f"Tahoe CWND: {self.cwnd_tahoe:.1f} MSS")
@@ -540,36 +609,20 @@ class LiveTCPCongestionWidget(QWidget):
         self._redraw_plot()
 
     def _redraw_plot(self):
-        self.ax.clear()
-        self.ax.set_facecolor("#181825")
-        self.ax.grid(True, linestyle="--", alpha=0.3, color="#6c7086")
-        self.ax.tick_params(colors="#cdd6f4")
-        for spine in self.ax.spines.values():
-            spine.set_color("#45475a")
-
         mode = self.combo_mode.currentIndex()
-        if mode == 0:  # All in one
-            self.ax.plot(self.hist_time, self.hist_tahoe, label="TCP Tahoe (Drop to 1)", color="#f38ba8", linestyle="--", linewidth=2.0)
-            self.ax.plot(self.hist_time, self.hist_reno, label="TCP Reno (Fast Recovery)", color="#89b4fa", linewidth=2.0)
-            self.ax.plot(self.hist_time, self.hist_cubic, label="TCP CUBIC (Linux Default)", color="#cba6f7", linewidth=2.5)
-            self.ax.plot(self.hist_time, self.hist_sdn, label="SDN Dynamic Rerouting", color="#a6e3a1", linewidth=3.0)
-        elif mode == 1:
-            self.ax.plot(self.hist_time, self.hist_tahoe, label="TCP Tahoe (Drop to 1 MSS on Loss)", color="#f38ba8", linewidth=2.5)
-        elif mode == 2:
-            self.ax.plot(self.hist_time, self.hist_reno, label="TCP Reno (Fast Recovery / Halve)", color="#89b4fa", linewidth=2.5)
-        elif mode == 3:
-            self.ax.plot(self.hist_time, self.hist_cubic, label="TCP CUBIC (Cubic Trajectory)", color="#cba6f7", linewidth=2.5)
-        elif mode == 4:
-            self.ax.plot(self.hist_time, self.hist_sdn, label="SDN Dynamic Rerouting (Averts Loss)", color="#a6e3a1", linewidth=3.0)
+        self.line_tahoe.set_visible(mode in (0, 1))
+        self.line_reno.set_visible(mode in (0, 2))
+        self.line_cubic.set_visible(mode in (0, 3))
+        self.line_sdn.set_visible(mode in (0, 4))
 
-        self.ax.axhline(self.pipe_capacity, color="#f9e2af", linestyle=":", label=f"Bottleneck Capacity ({int(self.pipe_capacity)} pkts)")
-        self.ax.set_title("Live Transport-Layer CWND Saw-Tooth Dynamics", color="#cdd6f4", fontsize=11, fontweight="bold")
-        self.ax.set_xlabel("Transmission Time (seconds / RTTs)", color="#cdd6f4", fontsize=10)
-        self.ax.set_ylabel("Congestion Window (cwnd in MSS)", color="#cdd6f4", fontsize=10)
-        self.ax.legend(facecolor="#1e1e2e", edgecolor="#45475a", labelcolor="#cdd6f4", loc="upper left", fontsize=8)
+        if self.hist_time:
+            self.line_tahoe.set_data(self.hist_time, self.hist_tahoe)
+            self.line_reno.set_data(self.hist_time, self.hist_reno)
+            self.line_cubic.set_data(self.hist_time, self.hist_cubic)
+            self.line_sdn.set_data(self.hist_time, self.hist_sdn)
+            self.ax.set_xlim(self.hist_time[0], max(self.hist_time[-1], self.hist_time[0] + 1.0))
 
-        self.fig.tight_layout()
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
 
 class MasterSDNGUI(QMainWindow):
@@ -604,7 +657,7 @@ class MasterSDNGUI(QMainWindow):
         self.emulator = NetworkEmulator(controller=self.controller, ingress_port=9000)
         self.emulator.start()
 
-        self.receiver = UDPReceiver(bind_ip="127.0.0.1", bind_port=MAIN_UDP_PORT)
+        self.receiver = UDPReceiver(bind_ip="127.0.0.1", bind_port=MAIN_UDP_PORT, feedback_target=("127.0.0.1", 9005))
         self.receiver.start()
 
         self.cross_receiver = UDPReceiver(bind_ip="127.0.0.1", bind_port=CROSS_UDP_PORT)
@@ -613,13 +666,18 @@ class MasterSDNGUI(QMainWindow):
         self.main_sender: Optional[UDPSender] = None
         self.is_cross_burst_active = False
 
+        # Dirty-check cache to prevent redundant UI relayouts
+        self._last_flow_text = ""
+        self._last_active_path_status = ""
+        self._last_recovery_time_sec = None
+
         # Build UI
         self._init_ui()
 
-        # Telemetry Timer (10 Hz)
+        # Telemetry Timer (4 Hz / 250ms interval - optimal responsiveness without CPU churn)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._refresh_telemetry)
-        self.timer.start(100)
+        self.timer.start(250)
 
         self.start_epoch = time.time()
 
@@ -760,11 +818,17 @@ class MasterSDNGUI(QMainWindow):
         self.btn_reset_topo.clicked.connect(self._reset_topology)
         grid_ctrl.addWidget(self.btn_reset_topo, 7, 1)
 
+        self.rate_adaptation_enabled = False
+        self.btn_toggle_rate_adapt = QPushButton("UDP Rate Adaptation: OFF")
+        self.btn_toggle_rate_adapt.setStyleSheet("background-color: #313244; color: #cdd6f4;")
+        self.btn_toggle_rate_adapt.clicked.connect(self._toggle_rate_adapt)
+        grid_ctrl.addWidget(self.btn_toggle_rate_adapt, 8, 0, 1, 2)
+
         # Translucent Watermark: *D1 (Mininet + SDN Integration)
         lbl_wm_ctrl = QLabel("*D1")
         lbl_wm_ctrl.setAlignment(Qt.AlignmentFlag.AlignRight)
         lbl_wm_ctrl.setStyleSheet("color: rgba(205, 214, 244, 0.4); font-size: 8px; font-weight: bold;")
-        grid_ctrl.addWidget(lbl_wm_ctrl, 8, 1)
+        grid_ctrl.addWidget(lbl_wm_ctrl, 9, 1)
 
         right_col.addWidget(grp_ctrl)
 
@@ -839,8 +903,8 @@ class MasterSDNGUI(QMainWindow):
     # Event handlers
     def _on_queue_changed(self, val):
         self.lbl_queue.setText(f"Queue Limit: {val} pkts")
-        self.emulator.link_path_a.max_queue = val
-        self.emulator.link_path_b.max_queue = val
+        self.emulator.link_path_a.set_max_queue(val)
+        self.emulator.link_path_b.set_max_queue(val)
         self.topo_canvas.queue_limit = val
 
     def _on_bw_changed(self, val):
@@ -851,10 +915,21 @@ class MasterSDNGUI(QMainWindow):
     def _on_host_rate_changed(self, val):
         self.lbl_host_rate.setText(f"Main Sending Rate: {val}.0 Mbps")
         if self.main_sender:
-            self.main_sender.rate_mbps = float(val)
+            self.main_sender.set_rate(float(val))
 
     def _on_cross_rate_changed(self, val):
         self.lbl_cross_rate.setText(f"Cross-Traffic Burst: {val}.0 Mbps")
+
+    def _toggle_rate_adapt(self):
+        self.rate_adaptation_enabled = not self.rate_adaptation_enabled
+        if self.rate_adaptation_enabled:
+            self.btn_toggle_rate_adapt.setText("UDP Rate Adaptation: ON (Feedback Active)")
+            self.btn_toggle_rate_adapt.setStyleSheet("background-color: #a6e3a1; color: #11111b;")
+        else:
+            self.btn_toggle_rate_adapt.setText("UDP Rate Adaptation: OFF")
+            self.btn_toggle_rate_adapt.setStyleSheet("background-color: #313244; color: #cdd6f4;")
+        if self.main_sender:
+            self.main_sender.enable_rate_adaptation = self.rate_adaptation_enabled
 
     def _toggle_main_stream(self):
         if self.main_sender and self.main_sender._running:
@@ -864,7 +939,14 @@ class MasterSDNGUI(QMainWindow):
             self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b;")
         else:
             rate = float(self.slider_host_rate.value())
-            self.main_sender = UDPSender(target_ip="127.0.0.1", target_port=9000, rate_mbps=rate, flow_id=FLOW_MAIN)
+            self.main_sender = UDPSender(
+                target_ip="127.0.0.1",
+                target_port=9000,
+                rate_mbps=rate,
+                flow_id=FLOW_MAIN,
+                enable_rate_adaptation=self.rate_adaptation_enabled,
+                feedback_port=9005
+            )
             self.main_sender.start()
             self.btn_toggle_sender.setText("⏹ Stop Main UDP Stream")
             self.btn_toggle_sender.setStyleSheet("background-color: #eba0ac; color: #11111b;")
@@ -900,6 +982,7 @@ class MasterSDNGUI(QMainWindow):
         self.controller.current_active_path = PATH_PRIMARY
         self.controller.total_reroutes = 0
         self.controller.consecutive_breaches = 0
+        self.controller.both_paths_congested = False
         QMessageBox.information(self, "Topology Reset", "Network topology reset to initial state. Active Path: Path-A.")
 
     def _run_benchmark_async(self):
@@ -932,39 +1015,48 @@ class MasterSDNGUI(QMainWindow):
         ctrl_status = self.controller.get_controller_status()
 
         thpt = stats.get("throughput_mbps", 0.0)
-        loss = stats.get("loss_pct", 0.0)
+        goodput = stats.get("goodput_mbps", 0.0)
+        win_loss = stats.get("window_loss_pct", stats.get("loss_pct", 0.0))
+        all_loss = stats.get("overall_loss_pct", 0.0)
+        loss = win_loss
         lat = stats.get("avg_latency_ms", 0.0)
         jit = stats.get("jitter_ms", 0.0)
         recv = stats.get("total_received", 0)
         lost = stats.get("total_lost", 0)
+        total_pkts = recv + lost
 
-        self.lbl_val_thpt.setText(f"{thpt:.2f} Mbps")
-        self.lbl_val_loss.setText(f"{loss:.1f} %")
+        self.lbl_val_thpt.setText(f"{thpt:.2f} Mbps (Goodput: {goodput:.2f}M)")
+        self.lbl_val_loss.setText(f"{win_loss:.1f}% (Overall: {all_loss:.1f}%)")
         self.lbl_val_lat.setText(f"{lat:.1f} ms")
         self.lbl_val_jit.setText(f"{jit:.2f} ms")
-        self.lbl_val_counts.setText(f"Recv: {recv} | Lost: {lost}")
+        self.lbl_val_counts.setText(f"Recv: {recv:,} | Lost: {lost:,} (Total: {total_pkts:,})")
 
-        # Active path status
+        # Active path status with dirty-checking
         active_path = ctrl_status["active_path"]
-        if active_path == PATH_PRIMARY:
-            self.lbl_active_path_status.setText("ACTIVE PATH: Path-A (Primary)")
-            self.lbl_active_path_status.setStyleSheet("background: #a6e3a1; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
-        else:
-            self.lbl_active_path_status.setText("ACTIVE PATH: Path-B (REROUTED)")
-            self.lbl_active_path_status.setStyleSheet("background: #89b4fa; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
+        both_congested = bool(ctrl_status.get("both_paths_congested"))
+        status_key = f"{active_path}_{both_congested}"
+        if status_key != self._last_active_path_status:
+            self._last_active_path_status = status_key
+            if both_congested:
+                self.lbl_active_path_status.setText("CRITICAL: BOTH PATHS CONGESTED")
+                self.lbl_active_path_status.setStyleSheet("background: #f38ba8; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
+            elif active_path == PATH_PRIMARY:
+                self.lbl_active_path_status.setText("ACTIVE PATH: Path-A (Primary)")
+                self.lbl_active_path_status.setStyleSheet("background: #a6e3a1; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
+            else:
+                self.lbl_active_path_status.setText("ACTIVE PATH: Path-B (DYNAMICALLY REROUTED)")
+                self.lbl_active_path_status.setStyleSheet("background: #89b4fa; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
 
-        if ctrl_status.get("latest_recovery_time_sec"):
-            self.lbl_recovery_time.setText(f"Failover Latency: {ctrl_status['latest_recovery_time_sec'] * 1000:.2f} ms")
+        rec_sec = ctrl_status.get("latest_recovery_time_sec")
+        if rec_sec != self._last_recovery_time_sec and rec_sec is not None:
+            self._last_recovery_time_sec = rec_sec
+            self.lbl_recovery_time.setText(f"Failover Latency: {rec_sec * 1000:.2f} ms")
 
-        # Update OpenFlow Flow Table Display
-        out_port = "Port 3 (Path B via S3) [REROUTED]" if active_path == PATH_ALTERNATE else "Port 2 (Path A via S2) [DEFAULT]"
-        flow_text = (
-            f"Switch s1 (OpenFlow 1.3 Flow Table):\n"
-            f" 1. Priority 10  | Match: eth_type=0x0806 (ARP)                 | Action: FLOOD\n"
-            f" 2. Priority 50  | Match: UDP dst=9998 (Cross H3->H4)           | Action: OUTPUT Port 2 (Path A)\n"
-            f" 3. Priority 200 | Match: UDP dst=9999 (Main H1->H2)            | Action: OUTPUT {out_port}"
-        )
-        self.lbl_flow_table.setText(flow_text)
+        # Query live OpenFlow Flow Table Display with dirty checking
+        flow_text = self.controller.get_flow_table("s1")
+        if flow_text != self._last_flow_text:
+            self.lbl_flow_table.setText(flow_text)
+            self._last_flow_text = flow_text
 
         # Update visual topology
         load_a = ctrl_status.get("path_a_load_mbps", 0.0)

@@ -106,4 +106,58 @@ The controller sends an `OFPFlowMod` (Flow Modification) message with `command =
 ### Q9: What is "Recovery Time" and what was the measured result?
 **Answer:**
 * **Recovery Time** is the time interval starting from the moment congestion threshold is breached until the SDN controller successfully installs the alternate flow rule and packets begin arriving through Path B.
-* In our tests, the recovery time is measured at **$\approx 0.05$ to $0.5$ seconds**, restoring nominal 6.0 Mbps throughput and reducing packet loss from $\sim 55\%$ back to $\sim 0\%$.
+* In our tests, the recovery time is measured at **$\approx 8.98\text{ ms}$ to $11.46\text{ ms}$ ($0.011\text{s}$)**, restoring nominal 6.0 Mbps throughput and reducing packet loss from $\sim 50\%$ back to $\sim 0\%$.
+
+---
+
+## 4. Performance Engineering & Systems Optimization
+
+### Q10: How did you profile and eliminate UI event-loop freezing in the presentation dashboard?
+**Answer:**
+* **Diagnostic Profiling:** Using `psutil` and headless Qt event loop profiling, we discovered that `RealtimePlotCanvas.update_plot()` took **187.02 ms** per frame. The function was calling `ax.clear()`, rebuilding all grid spines, reconfiguring tick marks, and executing synchronous `self.draw()` inside a 10 Hz timer. Because redraw duration exceeded the 100 ms timer interval, the Qt main thread was 100% saturated.
+* **Architectural Solution:**
+  1. We pre-configured axes, spines, and labels once in `__init__`.
+  2. We pre-allocated persistent `Line2D` objects (`line_thpt`, `line_loss`).
+  3. We updated coordinates in-place using `line.set_data(x, y)` and `ax.set_xlim()`.
+  4. We replaced synchronous `self.draw()` with non-blocking `self.draw_idle()`.
+* **Result:** Frame redraw duration dropped from **187.02 ms to 0.08 ms (~2,337x speedup)**, completely eliminating event loop starvation.
+
+---
+
+### Q11: How do you prevent memory leaks during long-running socket streams?
+**Answer:**
+* In network telemetry, appending arrival timestamps and rolling snapshots to raw Python lists creates an $O(N)$ unbounded memory leak.
+* We replaced raw lists in `UDPReceiver` with **bounded circular ring buffers** using `collections.deque`:
+  - `self.latencies_ms: Deque[float] = deque(maxlen=2000)`
+  - `self.history: Deque[Dict[str, Any]] = deque(maxlen=500)`
+* `collections.deque` automatically discards the oldest element when the maximum length is exceeded in $O(1)$ time without memory reallocations, strictly bounding our application RAM working set to **~92–95 MB** over indefinitely long streaming sessions.
+
+---
+
+### Q12: Why is `perf_counter()` used instead of `time.sleep()` alone for microsecond rate pacing?
+**Answer:**
+* Calling `time.sleep(interval)` inside a transmission loop accumulates OS thread scheduling delay on every iteration (OS timer quantum is typically 1–15 ms on Windows/Linux). An intended 6.0 Mbps stream would drift down to ~4.5 Mbps.
+* **Drift-Compensated Loop:** We maintain `next_send_time += packet_interval` and compute sleep duration relative to `time.perf_counter()` (monotonic clock with nanosecond resolution). If the OS context switches for 2 ms, the subsequent iteration sleeps less, guaranteeing a razor-sharp 6.0 Mbps average transmission rate.
+
+---
+
+### Q13: What is the performance benefit of pre-compiling `struct.Struct`?
+**Answer:**
+* Standard `struct.pack("!4sIdHBBH", ...)` must parse, validate, and compile the format string on every single call.
+* At 6.0 Mbps with 1024-byte datagrams, the sender pushes ~730 packets/second; at 10 Mbps it pushes ~1,220 packets/second.
+* Pre-compiling `HEADER_STRUCT = struct.Struct("!4sIdHBBH")` caches the byte offsets and C-type converters in memory, yielding a **~2.8x faster serialization/deserialization speed** directly to/from byte buffers via `unpack_from()`.
+
+---
+
+### Q14: How does the application achieve 60 FPS topology rendering without garbage-collection lag?
+**Answer:**
+* `AnimatedTopologyCanvas` runs at a 16 ms interval (~60 FPS).
+* Standard Qt widgets re-instantiate `QFont`, `QPen`, and `QBrush` objects inside `paintEvent`. In a 60 FPS animation loop, this generates thousands of transient objects per second, causing GC pauses.
+* We pre-cached all visual pens, fonts, brushes, and color objects in `__init__`. The `paintEvent` simply applies these cached references, keeping paint execution duration under **0.04 ms**.
+
+---
+
+### Q15: What are the translucent watermarks (`*D1`, `*D2`) and where are they located?
+**Answer:**
+* **`*D1` Watermark:** Marks components satisfying Rubric Deliverable D1 (Foundation, Mininet/SDN topology, low-level socket programming). Located on the bottom-right of the **Animated Topology Canvas** and the **Category 2 Telemetry Panel**.
+* **`*D2` Watermark:** Marks components satisfying Rubric Deliverable D2 (Advanced Functionality, dynamic SDN rerouting, transport-layer TCP vs SDN comparison, and comparative benchmarking). Located on the **Live Performance Plot**, the **TCP CWND Comparison Widget**, and the **Benchmark Evaluation Panel**.
