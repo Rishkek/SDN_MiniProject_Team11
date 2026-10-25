@@ -14,6 +14,7 @@ MAIN_UDP_PORT = 9999
 CROSS_UDP_PORT = 9998
 CONTROLLER_PORT = 6653
 CONTROLLER_REST_PORT = 8080
+TELEMETRY_MONITOR_PORT = 9010  # Live terminal packet monitor stream
 
 # Network Topology Constraints
 LINK_CAPACITY_MBPS = 10.0     # Bottleneck link bandwidth

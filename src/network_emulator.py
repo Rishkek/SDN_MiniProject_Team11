@@ -18,14 +18,16 @@ try:
     from src.protocol import unpack_packet, InvalidPacketError, FLOW_MAIN, FLOW_CROSS
     from src.config import (
         LINK_CAPACITY_MBPS, PATH_A_DELAY_MS, PATH_B_DELAY_MS,
-        MAIN_UDP_PORT, CROSS_UDP_PORT, PATH_PRIMARY, PATH_ALTERNATE
+        MAIN_UDP_PORT, CROSS_UDP_PORT, PATH_PRIMARY, PATH_ALTERNATE,
+        TELEMETRY_MONITOR_PORT
     )
     from src.sdn_controller import SDNController
 except ImportError:
     from protocol import unpack_packet, InvalidPacketError, FLOW_MAIN, FLOW_CROSS
     from config import (
         LINK_CAPACITY_MBPS, PATH_A_DELAY_MS, PATH_B_DELAY_MS,
-        MAIN_UDP_PORT, CROSS_UDP_PORT, PATH_PRIMARY, PATH_ALTERNATE
+        MAIN_UDP_PORT, CROSS_UDP_PORT, PATH_PRIMARY, PATH_ALTERNATE,
+        TELEMETRY_MONITOR_PORT
     )
     from sdn_controller import SDNController
 
@@ -61,6 +63,13 @@ class SimulatedLink:
         with self._lock:
             self.max_queue = max(10, min(100, int(new_limit)))
 
+    def set_capacity_mbps(self, new_capacity: float):
+        """Dynamically adjusts the link bandwidth capacity."""
+        with self._lock:
+            self.capacity_mbps = max(1.0, min(20.0, float(new_capacity)))
+            self._bytes_per_sec = (self.capacity_mbps * 1_000_000.0) / 8.0
+            self._max_tokens = max(16384.0, self._bytes_per_sec * self._burst_depth_sec)
+
     def start(self, forward_handler):
         self.forward_handler = forward_handler
         self._running = True
@@ -72,22 +81,22 @@ class SimulatedLink:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
 
-    def enqueue(self, packet_bytes: bytes, destination_addr):
+    def enqueue(self, packet_bytes: bytes, destination_addr) -> bool:
         self.rx_bytes += len(packet_bytes)
         # Enforce drop-tail queue buffer limit
         if self.packet_queue.qsize() >= self.max_queue:
             self.dropped_packets += 1
-            return
+            return False
         try:
             self.packet_queue.put_nowait((packet_bytes, destination_addr, time.time()))
+            return True
         except queue.Full:
             self.dropped_packets += 1
+            return False
 
     def _drain_loop(self):
-        bytes_per_sec = self._bytes_per_sec
-        max_tokens = self._max_tokens
-        tokens = max_tokens
         last_token_time = time.perf_counter()
+        tokens = max(16384.0, (self.capacity_mbps * 1_000_000.0 / 8.0) * self._burst_depth_sec)
 
         while self._running:
             try:
@@ -103,14 +112,18 @@ class SimulatedLink:
             if wait_for_flight > 0.001:
                 time.sleep(wait_for_flight)
 
-            # 2. Token-bucket bandwidth limiter
+            # 2. Token-bucket bandwidth limiter (dynamically computed for immediate slider responsiveness)
+            with self._lock:
+                bps = (self.capacity_mbps * 1_000_000.0) / 8.0
+                max_tok = max(16384.0, bps * self._burst_depth_sec)
+
             now = time.perf_counter()
             delta = now - last_token_time
             last_token_time = now
-            tokens = min(max_tokens, tokens + delta * bytes_per_sec)
+            tokens = min(max_tok, tokens + delta * bps)
 
             if tokens < pkt_len:
-                needed = (pkt_len - tokens) / bytes_per_sec
+                needed = (pkt_len - tokens) / bps
                 if needed > 0.0005:
                     time.sleep(needed)
                 tokens = 0.0
@@ -138,10 +151,22 @@ class NetworkEmulator:
         self._sock = None
         self._out_sock = None
         self._relay_thread = None
+        self.packet_callbacks = []
+        self._monitor_sock = None
 
         # Build virtual links for Path A and Path B
         self.link_path_a = SimulatedLink("Path-A (S1->S2->S4)", capacity_mbps=LINK_CAPACITY_MBPS, delay_ms=PATH_A_DELAY_MS)
         self.link_path_b = SimulatedLink("Path-B (S1->S3->S4)", capacity_mbps=LINK_CAPACITY_MBPS, delay_ms=PATH_B_DELAY_MS)
+
+    def register_packet_callback(self, cb):
+        """Registers a callback function to receive packet transmission events."""
+        if cb not in self.packet_callbacks:
+            self.packet_callbacks.append(cb)
+
+    def unregister_packet_callback(self, cb):
+        """Unregisters a previously registered packet callback function."""
+        if cb in self.packet_callbacks:
+            self.packet_callbacks.remove(cb)
 
     def start(self):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -150,10 +175,25 @@ class NetworkEmulator:
 
         self._out_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+        try:
+            self._monitor_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        except OSError:
+            self._monitor_sock = None
+
         # Wire link egress directly to the local destination sockets (H2 or H4)
         def forward_to_dest(data, dest):
             try:
                 self._out_sock.sendto(data, dest)
+            except (ConnectionResetError, ConnectionRefusedError):
+                try:
+                    self._out_sock.close()
+                except OSError:
+                    pass
+                self._out_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                try:
+                    self._out_sock.sendto(data, dest)
+                except OSError:
+                    pass
             except OSError:
                 pass
 
@@ -172,6 +212,44 @@ class NetworkEmulator:
             self._sock.close()
         if self._out_sock:
             self._out_sock.close()
+        if self._monitor_sock:
+            try:
+                self._monitor_sock.close()
+            except OSError:
+                pass
+            self._monitor_sock = None
+
+    def _dispatch_packet_event(self, seq: int, flow_id: int, size: int, active_link: SimulatedLink, is_forwarded: bool):
+        now_str = time.strftime("%H:%M:%S") + f".{int((time.time() % 1) * 1000):03d}"
+        path_name = "Path-A" if active_link == self.link_path_a else "Path-B"
+        flow_name = "MAIN" if flow_id == FLOW_MAIN else "CROSS"
+        status = "FORWARDED" if is_forwarded else "DROPPED (Queue Overflow)"
+        q_cur = self.link_path_a.packet_queue.qsize()
+        q_max = self.link_path_a.max_queue
+        evt = {
+            "time": now_str,
+            "flow": flow_name,
+            "flow_id": flow_id,
+            "seq": seq,
+            "size": size,
+            "path": path_name,
+            "queue": f"{q_cur}/{q_max}",
+            "status": status,
+            "is_dropped": not is_forwarded,
+            "is_rerouted": (flow_id == FLOW_MAIN and active_link == self.link_path_b)
+        }
+        for cb in self.packet_callbacks:
+            try:
+                cb(evt)
+            except Exception:
+                pass
+
+        if self._monitor_sock:
+            try:
+                line = f"[{now_str}] [{flow_name} #{seq:>5}] {path_name:>6} | Q:{q_cur:>2}/{q_max} | {status}"
+                self._monitor_sock.sendto(line.encode(), ("127.0.0.1", TELEMETRY_MONITOR_PORT))
+            except OSError:
+                pass
 
     def _switch_relay_loop(self):
         self._sock.settimeout(0.3)
@@ -189,8 +267,12 @@ class NetworkEmulator:
                 data, addr = self._sock.recvfrom(65535)
             except socket.timeout:
                 continue
+            except (ConnectionResetError, ConnectionRefusedError):
+                continue
             except OSError:
-                break
+                if not self._running:
+                    break
+                continue
 
             try:
                 seq, ts, flow_id, flags, payload = unpack_packet(data)
@@ -198,15 +280,21 @@ class NetworkEmulator:
                 continue
 
             # Switch routing table logic
+            active_link = None
+            dest = None
             if flow_id == FLOW_MAIN:
                 dest = ("127.0.0.1", MAIN_UDP_PORT)
                 # Query controller for current active path
                 if self.controller.current_active_path == PATH_PRIMARY:
-                    self.link_path_a.enqueue(data, dest)
+                    active_link = self.link_path_a
                 else:
-                    self.link_path_b.enqueue(data, dest)
+                    active_link = self.link_path_b
 
             elif flow_id == FLOW_CROSS:
                 dest = ("127.0.0.1", CROSS_UDP_PORT)
                 # Cross-traffic always flows through Path A to create congestion
-                self.link_path_a.enqueue(data, dest)
+                active_link = self.link_path_a
+
+            if active_link and dest:
+                is_forwarded = active_link.enqueue(data, dest)
+                self._dispatch_packet_event(seq, flow_id, len(data), active_link, is_forwarded)

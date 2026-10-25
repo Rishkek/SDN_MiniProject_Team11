@@ -200,7 +200,8 @@ D2: Advanced Deliverables (25 Marks)
             - evaluation_results.png: 4-panel publication-quality plots.
   [6 Marks] Documentation, Final Demo & Viva:
             - README.md: Comprehensive setup & reproduction guide.
-            - VIVA_GUIDE.md: Complete questions & model answers for viva.
+            - study1.md, study2.md, study3.md: Subsystem architectural guides.
+            - viva1.md, viva2.md, viva3.md: Step-by-step demo guides & viva Q&A.
 =============================================================================
     """
     print(mapping)
@@ -263,6 +264,44 @@ def interactive_menu():
         input("\nPress Enter to return to main menu...")
 
 
+def run_packet_monitor():
+    """Listens for real-time packet transmissions and displays them live in the terminal."""
+    import socket
+    from src.config import TELEMETRY_MONITOR_PORT
+
+    print("\n" + "=" * 75)
+    print("      REAL-TIME SDN PACKET & DATA TRANSFER TERMINAL MONITOR")
+    print("=" * 75)
+    print(f"[*] Binding listener to 127.0.0.1:{TELEMETRY_MONITOR_PORT}...")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("127.0.0.1", TELEMETRY_MONITOR_PORT))
+    except OSError as e:
+        print(f"[!] Could not bind to port {TELEMETRY_MONITOR_PORT}: {e}")
+        return
+
+    print("[+] Connected! Streaming real-time packet transmissions, queue depths, and SDN reroutes...")
+    print("    [Press Ctrl+C to stop monitor]\n" + "-" * 75)
+    try:
+        while True:
+            data, _ = sock.recvfrom(4096)
+            line = data.decode(errors="replace")
+            # ANSI colored terminal output
+            if "DROPPED" in line:
+                print(f"\033[91m{line}\033[0m")
+            elif "Path-B" in line:
+                print(f"\033[96m{line}\033[0m")
+            elif "CONGESTION" in line or "FlowMod" in line:
+                print(f"\033[93m{line}\033[0m")
+            else:
+                print(f"\033[92m{line}\033[0m")
+    except KeyboardInterrupt:
+        print("\n[*] Packet monitor terminated.")
+    finally:
+        sock.close()
+
+
 def launch_gui_dashboard():
     """Launches the master PyQt6 Graphical User Interface."""
     try:
@@ -279,6 +318,7 @@ def main():
     parser.add_argument("--gui", action="store_true", help="Launch PyQt6 Graphical User Interface (Default)")
     parser.add_argument("--cli", action="store_true", help="Launch interactive CLI menu instead of GUI")
     parser.add_argument("--demo", action="store_true", help="Run interactive dynamic rerouting terminal demo")
+    parser.add_argument("--monitor", action="store_true", help="Launch real-time packet stream terminal monitor")
     parser.add_argument("--benchmark", action="store_true", help="Run comparative benchmark and generate plots")
     parser.add_argument("--mininet", action="store_true", help="Launch Mininet topology (Linux only)")
     parser.add_argument("--test", action="store_true", help="Run test suite")
@@ -286,6 +326,8 @@ def main():
 
     if args.cli:
         interactive_menu()
+    elif args.monitor:
+        run_packet_monitor()
     elif args.demo:
         run_interactive_demo()
     elif args.benchmark:

@@ -3,13 +3,22 @@ Master Interactive Presentation Dashboard (PyQt6) for SDN Congestion Detection &
 Topic 27: SDN-Socket Programming.
 
 Key Capabilities:
-1. Animated Visual Topology with moving packet streams, queue buffer meter, and active path highlights.
-2. Live OpenFlow 1.3 Flow Table Inspector on Switch S1 showing dynamic rule injection.
-3. Category 2 Controls: Queue limit (10-100), Bottleneck Bandwidth (2-10M), Host Rate, Burst Rate.
-4. Manual and Automatic Rerouting Controls (Force Path A, Force Path B, Auto-SDN).
-5. Live Category 2 Telemetry: Throughput (Mbps), Packet Loss Rate (%), Latency, Jitter, Packet Counters.
-6. Real-Time Interactive Transport Layer Congestion Simulation (TCP Tahoe, Reno, CUBIC & SDN Dynamic Rerouting)
-   with live tick-by-tick animated saw-tooth graph, digital CWND readouts, and instant loss injection.
+1. High-DPI Crisp Vector Graphics (PassThrough scale policy, subpixel antialiasing).
+2. Intelligent Dynamic Resizing & Proportional Layouts:
+   - Interactive QSplitter dividing Topology and NOC Control Panel with user-adjustable ratios.
+   - Modern NOC Digital Telemetry KPI Cards preventing label wrapping and clipping.
+   - Dedicated full-height SDN Dynamic Rerouting Analytics Dashboard with spacious multi-metric graphs.
+3. Pop-out, Float & Dock-back Architecture:
+   - Any tab can be popped out into an independent, freely resizable OS window with 1 click.
+   - Popped-out windows feature '📥 Dock Back In' buttons and close-to-dock event handling.
+   - Multi-monitor support via View -> Pop Out All Windows and Dock All Windows Back In.
+4. Live Visual Diamond Topology with moving packet streams, queue buffer meter, and active path highlights.
+5. Embedded Real-Time Datagram Stream Terminal + Launch External OS Terminal button.
+6. Interactive Zoomable, Pannable & Movable Real-Time Performance Plots with NavigationToolbar.
+7. Switch S1 Live OpenFlow 1.3 Flow Table Inspector.
+8. Category 2 Controls: Queue limit (10-100), Bottleneck Bandwidth (2-10M), Host Rate, Burst Rate.
+9. Category 2 Telemetry: Throughput (Mbps), Packet Loss Rate (%), Latency, Jitter, Packet Counters.
+10. Preserves all *D1 and *D2 translucent verification watermarks.
 """
 
 import sys
@@ -17,27 +26,38 @@ import os
 import time
 import math
 import random
+import queue
+import subprocess
 import threading
 from collections import deque
 from typing import Optional, List, Dict, Any, Deque
 
+# Force high-DPI scaling before QApplication initialization to eliminate blurriness on Windows
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QSlider, QTabWidget, QGroupBox, QGridLayout,
-    QProgressBar, QFrame, QMessageBox, QComboBox, QTextEdit
+    QProgressBar, QFrame, QMessageBox, QComboBox, QTextEdit, QPlainTextEdit,
+    QSplitter, QScrollArea, QSizePolicy, QToolBar, QMenuBar, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer, QPointF
-from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush
+from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QAction, QTextCursor
 
 import matplotlib
 matplotlib.use("QtAgg")
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import (
+    FigureCanvasQTAgg as FigureCanvas,
+    NavigationToolbar2QT as NavigationToolbar
+)
 from matplotlib.figure import Figure
 
 # Project imports
 from src.config import (
     MAIN_UDP_PORT, CROSS_UDP_PORT, LINK_CAPACITY_MBPS,
-    CONGESTION_THRESHOLD_MBPS, PATH_PRIMARY, PATH_ALTERNATE
+    CONGESTION_THRESHOLD_MBPS, PATH_PRIMARY, PATH_ALTERNATE,
+    TELEMETRY_MONITOR_PORT
 )
 from src.sdn_controller import SDNController
 from src.network_emulator import NetworkEmulator
@@ -52,7 +72,7 @@ class PacketDot:
     def __init__(self, path: str, color: QColor, speed: float = 0.015):
         self.path = path  # 'main_a', 'main_b', 'cross_a'
         self.color = color
-        self.progress = 0.0  # 0.0 to 1.0
+        self.progress = 0.0
         self.speed = speed
 
 
@@ -62,17 +82,22 @@ class AnimatedTopologyCanvas(QWidget):
     - Moving animated packet dots on active paths (60 FPS smooth rendering)
     - Link queue buffer fill gauges (0 to 100%)
     - Active path highlighting
-    - Real-time Switch S1 OpenFlow 1.3 Flow Table inspector
+    - High-DPI crisp vector rendering (Antialiasing + TextAntialiasing + SmoothPixmapTransform)
+    - Dynamically responsive node positioning and scaling
+    - Translucent Watermark: *D1
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(320)
+        self.setMinimumHeight(240)
+        self.setMinimumWidth(360)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         self.active_path = PATH_PRIMARY
         self.path_a_load = 0.0
         self.path_b_load = 0.0
         self.is_congested = False
-        self.queue_occupancy = 0.0  # 0 to 100%
+        self.queue_occupancy = 0.0
         self.queue_limit = 100
         self.flow_main_active = False
         self.flow_cross_active = False
@@ -82,7 +107,6 @@ class AnimatedTopologyCanvas(QWidget):
         self.anim_timer.timeout.connect(self._step_animation)
         self.anim_timer.start(16)  # ~60 FPS smooth rendering
 
-        # Pre-allocated visual assets to eliminate GC churn and Qt font lookups in paintEvent
         self._font_regular_7 = QFont("Segoe UI", 7)
         self._font_bold_7 = QFont("Segoe UI", 7, QFont.Weight.Bold)
         self._font_bold_8 = QFont("Segoe UI", 8, QFont.Weight.Bold)
@@ -126,7 +150,6 @@ class AnimatedTopologyCanvas(QWidget):
         self.flow_cross_active = cross_active
 
     def _step_animation(self):
-        # Spawn new packets if streams are running (adjusted for ~60 FPS rate)
         if self.flow_main_active and random.random() < 0.22:
             p_type = 'main_b' if self.active_path == PATH_ALTERNATE else 'main_a'
             self.packets.append(PacketDot(p_type, self._dot_color_main, speed=0.015))
@@ -134,7 +157,6 @@ class AnimatedTopologyCanvas(QWidget):
         if self.flow_cross_active and random.random() < 0.25:
             self.packets.append(PacketDot('cross_a', self._dot_color_cross, speed=0.015))
 
-        # Advance packets
         surviving = []
         for p in self.packets:
             p.progress += p.speed
@@ -146,14 +168,14 @@ class AnimatedTopologyCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        # Background
         painter.fillRect(self.rect(), self._color_bg)
 
-        w = self.width()
-        h = self.height()
+        w = max(360, self.width())
+        h = max(240, self.height())
 
-        # Node coordinates
         pos_h1 = (int(w * 0.08), int(h * 0.28))
         pos_h3 = (int(w * 0.08), int(h * 0.72))
         pos_s1 = (int(w * 0.26), int(h * 0.50))
@@ -163,7 +185,6 @@ class AnimatedTopologyCanvas(QWidget):
         pos_h2 = (int(w * 0.92), int(h * 0.28))
         pos_h4 = (int(w * 0.92), int(h * 0.72))
 
-        # Helper to draw link
         def draw_link(p1, p2, pen_or_color, thickness=3, label=None, alert=False):
             if isinstance(pen_or_color, QPen):
                 painter.setPen(pen_or_color)
@@ -177,13 +198,11 @@ class AnimatedTopologyCanvas(QWidget):
                 painter.setFont(self._font_bold_8)
                 painter.drawText(mid_x - 45, mid_y - 8, label)
 
-        # Draw base links
         draw_link(pos_h1, pos_s1, self._pen_link_h1, 2, "H1->S1")
         draw_link(pos_h3, pos_s1, self._pen_link_h3, 2, "H3->S1")
         draw_link(pos_s4, pos_h2, self._pen_link_h2, 2, "S4->H2")
         draw_link(pos_s4, pos_h4, self._pen_link_h4, 2, "S4->H4")
 
-        # Path A links (S1->S2->S4)
         is_path_a_active = (self.active_path == PATH_PRIMARY)
         color_a = self._color_path_red if self.is_congested else (self._color_path_green if is_path_a_active else self._color_path_idle)
         thick_a = 5 if is_path_a_active or self.flow_cross_active else 2
@@ -191,7 +210,6 @@ class AnimatedTopologyCanvas(QWidget):
         draw_link(pos_s1, pos_s2, color_a, thick_a, label_a, alert=self.is_congested)
         draw_link(pos_s2, pos_s4, color_a, thick_a)
 
-        # Path B links (S1->S3->S4)
         is_path_b_active = (self.active_path == PATH_ALTERNATE)
         color_b = self._color_path_green if is_path_b_active else self._color_path_idle
         thick_b = 5 if is_path_b_active else 2
@@ -199,20 +217,20 @@ class AnimatedTopologyCanvas(QWidget):
         draw_link(pos_s1, pos_s3, color_b, thick_b, label_b)
         draw_link(pos_s3, pos_s4, color_b, thick_b)
 
-        # Draw Queue Meter on Path A
-        q_box_x = int(w * 0.38)
-        q_box_y = int(h * 0.12)
+        # Dynamic Queue Meter on Path A
+        q_box_x = int(w * 0.36)
+        q_box_y = int(h * 0.08)
+        q_box_w = min(130, int(w * 0.20))
         painter.setBrush(self._brush_q_bg)
         painter.setPen(self._pen_q_border)
-        painter.drawRect(q_box_x, q_box_y, 110, 14)
-        fill_w = int(110 * (self.queue_occupancy / 100.0))
+        painter.drawRect(q_box_x, q_box_y, q_box_w, 14)
+        fill_w = int(q_box_w * (self.queue_occupancy / 100.0))
         q_brush = self._brush_q_pink if self.queue_occupancy > 80 else (self._brush_q_yellow if self.queue_occupancy > 50 else self._brush_q_green)
         painter.fillRect(q_box_x, q_box_y, fill_w, 14, q_brush)
         painter.setPen(self._color_text_white)
         painter.setFont(self._font_bold_7)
         painter.drawText(q_box_x + 6, q_box_y + 11, f"Queue: {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts")
 
-        # Draw Animated Packets moving along links
         def get_pos_on_segment(p1, p2, prog):
             return (p1[0] + (p2[0] - p1[0]) * prog, p1[1] + (p2[1] - p1[1]) * prog)
 
@@ -220,27 +238,15 @@ class AnimatedTopologyCanvas(QWidget):
         for p in self.packets:
             painter.setBrush(QBrush(p.color))
             if p.path == 'main_a':
-                # S1 -> S2 (0.0 - 0.5), S2 -> S4 (0.5 - 1.0)
-                if p.progress < 0.5:
-                    pt = get_pos_on_segment(pos_s1, pos_s2, p.progress * 2.0)
-                else:
-                    pt = get_pos_on_segment(pos_s2, pos_s4, (p.progress - 0.5) * 2.0)
+                pt = get_pos_on_segment(pos_s1, pos_s2, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(pos_s2, pos_s4, (p.progress - 0.5) * 2.0)
             elif p.path == 'main_b':
-                # S1 -> S3 (0.0 - 0.5), S3 -> S4 (0.5 - 1.0)
-                if p.progress < 0.5:
-                    pt = get_pos_on_segment(pos_s1, pos_s3, p.progress * 2.0)
-                else:
-                    pt = get_pos_on_segment(pos_s3, pos_s4, (p.progress - 0.5) * 2.0)
-            else:  # cross_a (Path A)
-                if p.progress < 0.5:
-                    pt = get_pos_on_segment(pos_s1, pos_s2, p.progress * 2.0)
-                else:
-                    pt = get_pos_on_segment(pos_s2, pos_s4, (p.progress - 0.5) * 2.0)
+                pt = get_pos_on_segment(pos_s1, pos_s3, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(pos_s3, pos_s4, (p.progress - 0.5) * 2.0)
+            else:
+                pt = get_pos_on_segment(pos_s1, pos_s2, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(pos_s2, pos_s4, (p.progress - 0.5) * 2.0)
             painter.drawEllipse(int(pt[0]) - 4, int(pt[1]) - 4, 8, 8)
 
-        # Helper to draw node
         def draw_node(pos, text, subtext, bg_color, is_switch=False):
-            rad = 22 if is_switch else 18
+            rad = 20 if is_switch else 17
             painter.setBrush(QBrush(bg_color))
             painter.setPen(self._pen_node)
             if is_switch:
@@ -249,408 +255,682 @@ class AnimatedTopologyCanvas(QWidget):
                 painter.drawEllipse(pos[0] - rad, pos[1] - rad, rad * 2, rad * 2)
 
             painter.setPen(self._color_text_white)
-            painter.setFont(self._font_bold_9)
+            painter.setFont(self._font_bold_8)
             painter.drawText(pos[0] - rad, pos[1] - rad, rad * 2, rad * 2, Qt.AlignmentFlag.AlignCenter, text)
 
             painter.setPen(self._color_text_dim)
             painter.setFont(self._font_regular_7)
-            painter.drawText(pos[0] - 30, pos[1] + rad + 12, subtext)
+            painter.drawText(pos[0] - 35, pos[1] + rad + 1, 70, 14, Qt.AlignmentFlag.AlignCenter, subtext)
 
-        # Draw Hosts
         draw_node(pos_h1, "H1", "10.0.0.1", self._color_h1)
         draw_node(pos_h3, "H3", "10.0.0.3", self._color_h3)
         draw_node(pos_h2, "H2", "10.0.0.2", self._color_h2)
         draw_node(pos_h4, "H4", "10.0.0.4", self._color_h4)
 
-        # Draw Switches
         draw_node(pos_s1, "S1", "Ingress", self._color_switch, is_switch=True)
         draw_node(pos_s2, "S2", "Primary", self._color_switch, is_switch=True)
         draw_node(pos_s3, "S3", "Backup", self._color_switch, is_switch=True)
         draw_node(pos_s4, "S4", "Egress", self._color_switch, is_switch=True)
 
-        # Translucent Watermark: *D1 (Problem Understanding & Mininet/SDN Topology)
         painter.setPen(self._pen_wm)
         painter.setFont(self._font_bold_8)
         painter.drawText(w - 38, h - 8, "*D1")
 
 
-class RealtimePlotCanvas(FigureCanvas):
-    """Matplotlib FigureCanvas for live throughput and packet loss plotting (Optimized)."""
+class RealtimePlotContainer(QWidget):
+    """
+    Live Throughput and Packet Loss Telemetry Plot.
+    Equipped with NavigationToolbar, Auto-Track, and crisp High-DPI rendering.
+    Translucent Watermark: *D2
+    """
 
     def __init__(self, parent=None):
-        self.fig = Figure(figsize=(6, 3), dpi=85, facecolor="#1e1e2e")
-        super().__init__(self.fig)
+        super().__init__(parent)
+        self.setMinimumHeight(200)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        top_bar = QHBoxLayout()
+        lbl_title = QLabel("📈 Live UDP Throughput & Packet Loss Telemetry")
+        lbl_title.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        lbl_title.setStyleSheet("color: #89b4fa;")
+        top_bar.addWidget(lbl_title)
+
+        top_bar.addStretch()
+
+        self.btn_autotrack = QPushButton("🔒 Live Auto-Track: ON")
+        self.btn_autotrack.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; border-radius: 4px; padding: 2px 8px; font-size: 10px;")
+        self.btn_autotrack.clicked.connect(self._toggle_autotrack)
+        top_bar.addWidget(self.btn_autotrack)
+
+        self.fig = Figure(figsize=(6, 2.8), dpi=115, facecolor="#1e1e2e")
+        self.canvas = FigureCanvas(self.fig)
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setStyleSheet("""
+            QToolBar { background: #181825; border: 1px solid #313244; border-radius: 4px; padding: 1px; }
+            QToolButton { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 3px; padding: 1px; margin: 1px; }
+            QToolButton:hover { background: #45475a; }
+            QToolButton:checked { background: #89b4fa; color: #11111b; }
+        """)
+        top_bar.addWidget(self.toolbar)
+        layout.addLayout(top_bar)
+
         self.ax1 = self.fig.add_subplot(2, 1, 1)
         self.ax2 = self.fig.add_subplot(2, 1, 2)
 
-        self.times: Deque[float] = deque(maxlen=70)
-        self.throughputs: Deque[float] = deque(maxlen=70)
-        self.losses: Deque[float] = deque(maxlen=70)
+        self.times: Deque[float] = deque(maxlen=90)
+        self.throughputs: Deque[float] = deque(maxlen=90)
+        self.losses: Deque[float] = deque(maxlen=90)
+        self.auto_track = True
 
-        # Pre-configure axes once to eliminate costly re-initialization on every tick
         for ax in [self.ax1, self.ax2]:
             ax.set_facecolor("#181825")
             ax.grid(True, linestyle="--", alpha=0.3, color="#6c7086")
-            ax.tick_params(colors="#cdd6f4", labelsize=8)
+            ax.tick_params(colors="#cdd6f4", labelsize=7)
             for spine in ax.spines.values():
                 spine.set_color("#45475a")
 
         self.ax1.set_ylabel("Mbps", color="#cdd6f4", fontsize=8)
         self.ax1.set_ylim(0, 10)
-        self.ax1.set_title("Live UDP Throughput (Mbps)", color="#cdd6f4", fontsize=9, fontweight="bold")
+        self.ax1.set_title("Live UDP Throughput (Mbps)", color="#cdd6f4", fontsize=8, fontweight="bold", pad=4)
+        self.ax1.tick_params(labelbottom=False)  # Clean! Bottom plot displays time axis
         self.line_thpt, = self.ax1.plot([], [], color="#a6e3a1", linewidth=2.0)
 
         self.ax2.set_ylabel("Loss %", color="#cdd6f4", fontsize=8)
-        self.ax2.set_xlabel("Time (s)", color="#cdd6f4", fontsize=8)
+        self.ax2.set_xlabel("Elapsed Time (s)", color="#cdd6f4", fontsize=8)
         self.ax2.set_ylim(-2, 70)
-        self.ax2.set_title("Live Packet Loss Rate (%)", color="#cdd6f4", fontsize=9, fontweight="bold")
+        self.ax2.set_title("Live Packet Loss Rate (%)", color="#cdd6f4", fontsize=8, fontweight="bold", pad=4)
         self.line_loss, = self.ax2.plot([], [], color="#f38ba8", linewidth=2.0)
 
-        # Translucent Watermark: *D2 (Dynamic SDN Performance Telemetry)
         self.ax2.text(0.98, 0.08, "*D2", transform=self.ax2.transAxes, color="#6c7086", alpha=0.45, fontsize=8, fontweight="bold", ha="right")
 
-        self.fig.tight_layout()
+        self.fig.subplots_adjust(top=0.90, bottom=0.18, left=0.12, right=0.95, hspace=0.40)
+        layout.addWidget(self.canvas, stretch=1)
+
+        self.canvas.mpl_connect('button_press_event', self._on_user_interaction)
+        self.canvas.mpl_connect('scroll_event', self._on_user_interaction)
+
+    def _on_user_interaction(self, event):
+        if self.toolbar.mode != "" and self.auto_track:
+            self._set_autotrack(False)
+
+    def _toggle_autotrack(self):
+        self._set_autotrack(not self.auto_track)
+        if self.auto_track and self.times:
+            xmin = self.times[0]
+            xmax = max(self.times[-1], xmin + 1.0)
+            self.ax1.set_xlim(xmin, xmax)
+            self.ax2.set_xlim(xmin, xmax)
+            self.canvas.draw_idle()
+
+    def _set_autotrack(self, val: bool):
+        self.auto_track = val
+        if self.auto_track:
+            self.btn_autotrack.setText("🔒 Live Auto-Track: ON")
+            self.btn_autotrack.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; border-radius: 4px; padding: 2px 8px; font-size: 10px;")
+        else:
+            self.btn_autotrack.setText("🔓 Auto-Track: PAUSED")
+            self.btn_autotrack.setStyleSheet("background-color: #fab387; color: #11111b; font-weight: bold; border-radius: 4px; padding: 2px 8px; font-size: 10px;")
 
     def update_plot(self, t: float, thpt: float, loss: float):
         self.times.append(t)
         self.throughputs.append(thpt)
         self.losses.append(loss)
 
-        # High-performance in-place line data updates (avoids rebuilding axes/spines/labels)
         self.line_thpt.set_data(self.times, self.throughputs)
         self.line_loss.set_data(self.times, self.losses)
 
-        if self.times:
+        if self.auto_track and self.times:
             xmin = self.times[0]
             xmax = max(self.times[-1], xmin + 1.0)
             self.ax1.set_xlim(xmin, xmax)
             self.ax2.set_xlim(xmin, xmax)
 
-        # Asynchronous non-blocking canvas update
-        self.draw_idle()
+        self.canvas.draw_idle()
 
 
-class LiveTCPCongestionWidget(QWidget):
+class LiveSDNReroutingAnalyticsWidget(QWidget):
     """
-    Live Interactive Transport Layer Congestion Simulation.
-    Shows CWND dynamics for TCP Tahoe, Reno, CUBIC and SDN Dynamic Rerouting tick-by-tick!
+    Dedicated High-Performance SDN Dynamic Rerouting Analytics Dashboard.
+    Expansive, full-height multi-metric plots:
+    - Top Plot (Spans 100% width): Dual-Path Offered Load vs SDN Congestion Threshold & Capacity
+    - Bottom Left (50% width): Switch S1 Ingress Buffer Queue Depth & Packet Loss Rate (%)
+    - Bottom Right (50% width): End-to-End One-Way Latency & RFC 3550 Jitter Stability (ms)
+    - NavigationToolbar, Auto-Track toggle, View Selector, and Event Log.
+    - Translucent Watermark: *D2
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        # Educational Scope Banner
-        scope_banner = QLabel("📌 [Interactive Educational Model] Demonstrates transport-layer host backoff (Tahoe drop-to-1, Reno halving, CUBIC cubic growth) versus infrastructure-level SDN dynamic traffic rerouting (loss averted before CWND collapse).")
-        scope_banner.setStyleSheet("color: #fab387; font-size: 10px; font-style: italic; padding: 2px 6px; background: #181825; border-radius: 4px;")
-        layout.addWidget(scope_banner)
+        # Header toolbar with actions & KPI readouts
+        top_bar = QHBoxLayout()
 
-        # Top Control Bar
-        top_bar = QFrame()
-        top_bar.setStyleSheet("background: #181825; border-radius: 6px; padding: 6px;")
-        t_layout = QHBoxLayout(top_bar)
+        self.btn_autotrack = QPushButton("🔒 Live Auto-Track: ON")
+        self.btn_autotrack.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; border-radius: 4px; padding: 4px 10px; font-size: 11px;")
+        self.btn_autotrack.clicked.connect(self._toggle_autotrack)
+        top_bar.addWidget(self.btn_autotrack)
 
-        self.combo_mode = QComboBox()
-        self.combo_mode.addItems([
-            "All-in-One Comparison (Tahoe vs Reno vs CUBIC vs SDN)",
-            "Solo Focus: TCP Tahoe (Drop to 1 on loss)",
-            "Solo Focus: TCP Reno (Fast Recovery / Halve cwnd)",
-            "Solo Focus: TCP CUBIC (RFC 8312 Linux Default)",
-            "Solo Focus: SDN Dynamic Rerouting (Zero CWND Collapse)"
-        ])
-        self.combo_mode.currentIndexChanged.connect(self._on_mode_changed)
-        t_layout.addWidget(QLabel("Simulation Mode:"))
-        t_layout.addWidget(self.combo_mode)
+        self.btn_clear = QPushButton("🧹 Clear History")
+        self.btn_clear.setStyleSheet("background-color: #313244; color: #cdd6f4; font-weight: bold; border-radius: 4px; padding: 4px 10px; font-size: 11px;")
+        self.btn_clear.clicked.connect(self._clear_history)
+        top_bar.addWidget(self.btn_clear)
 
-        self.btn_start = QPushButton("▶ Run Live Simulation")
-        self.btn_start.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold;")
-        self.btn_start.clicked.connect(self._toggle_sim)
-        t_layout.addWidget(self.btn_start)
+        top_bar.addStretch()
 
-        self.btn_inject_loss = QPushButton("💥 Trigger Packet Loss Event")
-        self.btn_inject_loss.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold;")
-        self.btn_inject_loss.clicked.connect(self._trigger_manual_loss)
-        t_layout.addWidget(self.btn_inject_loss)
+        # Live KPI Pills
+        self.lbl_kpi_path = QLabel("Active: Path-A")
+        self.lbl_kpi_path.setStyleSheet("background: #181825; color: #a6e3a1; font-weight: bold; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid #313244;")
+        top_bar.addWidget(self.lbl_kpi_path)
 
-        self.btn_reset = QPushButton("🔄 Reset Simulation")
-        self.btn_reset.setStyleSheet("background-color: #eba0ac; color: #11111b; font-weight: bold;")
-        self.btn_reset.clicked.connect(self._reset_sim)
-        t_layout.addWidget(self.btn_reset)
+        self.lbl_kpi_load = QLabel("Load: A=0.0M | B=0.0M")
+        self.lbl_kpi_load.setStyleSheet("background: #181825; color: #cdd6f4; font-weight: bold; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid #313244;")
+        top_bar.addWidget(self.lbl_kpi_load)
 
-        layout.addWidget(top_bar)
+        self.lbl_kpi_queue = QLabel("Queue: 0 pkts")
+        self.lbl_kpi_queue.setStyleSheet("background: #181825; color: #cba6f7; font-weight: bold; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid #313244;")
+        top_bar.addWidget(self.lbl_kpi_queue)
 
-        # Digital Readouts
-        readouts = QFrame()
-        readouts.setStyleSheet("background: #252538; border-radius: 6px; padding: 6px;")
-        r_layout = QHBoxLayout(readouts)
+        layout.addLayout(top_bar)
 
-        self.lbl_tahoe_val = QLabel("Tahoe CWND: 1.0 MSS")
-        self.lbl_tahoe_val.setStyleSheet("color: #f38ba8; font-weight: bold; font-size: 13px;")
-        r_layout.addWidget(self.lbl_tahoe_val)
-
-        self.lbl_reno_val = QLabel("Reno CWND: 1.0 MSS")
-        self.lbl_reno_val.setStyleSheet("color: #89b4fa; font-weight: bold; font-size: 13px;")
-        r_layout.addWidget(self.lbl_reno_val)
-
-        self.lbl_cubic_val = QLabel("CUBIC CWND: 1.0 MSS")
-        self.lbl_cubic_val.setStyleSheet("color: #cba6f7; font-weight: bold; font-size: 13px;")
-        r_layout.addWidget(self.lbl_cubic_val)
-
-        self.lbl_sdn_val = QLabel("SDN CWND: 1.0 MSS (Optimal)")
-        self.lbl_sdn_val.setStyleSheet("color: #a6e3a1; font-weight: bold; font-size: 13px;")
-        r_layout.addWidget(self.lbl_sdn_val)
-
-        # Translucent Watermark: *D2 (Challenging Scenario & Performance Comparison)
-        lbl_wm_tcp = QLabel("*D2")
-        lbl_wm_tcp.setStyleSheet("color: rgba(205, 214, 244, 0.4); font-weight: bold; font-size: 10px; padding: 2px;")
-        r_layout.addWidget(lbl_wm_tcp)
-
-        layout.addWidget(readouts)
-
-        # Matplotlib Live Saw-Tooth Plot (Optimized for instant non-blocking render)
-        self.fig = Figure(figsize=(8, 4), dpi=95, facecolor="#1e1e2e")
+        # Matplotlib Canvas & Toolbar
+        self.fig = Figure(figsize=(10, 6.2), dpi=115, facecolor="#1e1e2e")
         self.canvas = FigureCanvas(self.fig)
-        self.ax = self.fig.add_subplot(1, 1, 1)
-        self.ax.set_facecolor("#181825")
-        self.ax.grid(True, linestyle="--", alpha=0.3, color="#6c7086")
-        self.ax.tick_params(colors="#cdd6f4")
-        for spine in self.ax.spines.values():
-            spine.set_color("#45475a")
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setStyleSheet("""
+            QToolBar { background: #181825; border: 1px solid #313244; border-radius: 4px; padding: 2px; }
+            QToolButton { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 3px; padding: 2px; margin: 1px; }
+            QToolButton:hover { background: #45475a; }
+            QToolButton:checked { background: #89b4fa; color: #11111b; }
+        """)
+        layout.addWidget(self.toolbar)
 
-        self.ax.set_title("Live Transport-Layer CWND Saw-Tooth Dynamics", color="#cdd6f4", fontsize=11, fontweight="bold")
-        self.ax.set_xlabel("Transmission Time (seconds / RTTs)", color="#cdd6f4", fontsize=10)
-        self.ax.set_ylabel("Congestion Window (cwnd in MSS)", color="#cdd6f4", fontsize=10)
-        self.ax.set_ylim(0, 55)
+        # Proportional 2-row layout: Top full width, bottom 2 side-by-side
+        self.ax1 = self.fig.add_subplot(2, 1, 1)
+        self.ax2 = self.fig.add_subplot(2, 2, 3)
+        self.ax3 = self.fig.add_subplot(2, 2, 4)
 
+        for ax in [self.ax1, self.ax2, self.ax3]:
+            ax.set_facecolor("#181825")
+            ax.grid(True, linestyle="--", alpha=0.3, color="#6c7086")
+            ax.tick_params(colors="#cdd6f4", labelsize=8)
+            for spine in ax.spines.values():
+                spine.set_color("#45475a")
+
+        # Top Plot: Dual-Path Bandwidth & Congestion Threshold
+        self.ax1.set_ylabel("Offered Load (Mbps)", color="#cdd6f4", fontsize=8)
+        self.ax1.set_ylim(0, 14)
+        self.ax1.set_title("Dual-Path Offered Load (Path-A vs Path-B) vs SDN Congestion Threshold (8.0 Mbps)", color="#cdd6f4", fontsize=9, fontweight="bold", pad=6)
+        self.ax1.tick_params(labelbottom=False)  # Clean! Shared time axis displayed on bottom plots
+        self.line_load_a, = self.ax1.plot([], [], label="Path-A Load (Primary)", color="#a6e3a1", linewidth=2.2)
+        self.line_load_b, = self.ax1.plot([], [], label="Path-B Load (Alternate)", color="#89b4fa", linewidth=2.2)
+        self.line_thresh = self.ax1.axhline(CONGESTION_THRESHOLD_MBPS, color="#f9e2af", linestyle="--", linewidth=1.5, label=f"SDN Threshold ({CONGESTION_THRESHOLD_MBPS:.1f}M)")
+        self.line_cap = self.ax1.axhline(LINK_CAPACITY_MBPS, color="#fab387", linestyle=":", linewidth=1.5, label=f"Bottleneck Capacity ({LINK_CAPACITY_MBPS:.1f}M)")
+        self.ax1.legend(facecolor="#1e1e2e", edgecolor="#45475a", labelcolor="#cdd6f4", loc="upper left", fontsize=8, ncol=4)
+
+        # Bottom Left Plot: Queue Buffer & Packet Loss
+        self.ax2.set_ylabel("Queue (pkts) / Loss (%)", color="#cdd6f4", fontsize=8)
+        self.ax2.set_xlabel("Elapsed Time (s)", color="#cdd6f4", fontsize=8)
+        self.ax2.set_ylim(-2, 105)
+        self.ax2.set_title("Switch S1 Ingress Buffer Queue & Packet Loss Rate", color="#cdd6f4", fontsize=9, fontweight="bold", pad=6)
+        self.line_queue, = self.ax2.plot([], [], label="Queue Occupancy (pkts)", color="#cba6f7", linewidth=2.0)
+        self.line_loss, = self.ax2.plot([], [], label="Packet Loss Rate (%)", color="#f38ba8", linewidth=2.0)
+        self.ax2.legend(facecolor="#1e1e2e", edgecolor="#45475a", labelcolor="#cdd6f4", loc="upper left", fontsize=8, ncol=2)
+
+        # Bottom Right Plot: Latency & RFC 3550 Jitter
+        self.ax3.set_ylabel("Latency / Jitter (ms)", color="#cdd6f4", fontsize=8)
+        self.ax3.set_xlabel("Elapsed Time (s)", color="#cdd6f4", fontsize=8)
+        self.ax3.set_ylim(0, 60)
+        self.ax3.set_title("End-to-End One-Way Latency & RFC 3550 Jitter Stability", color="#cdd6f4", fontsize=9, fontweight="bold", pad=6)
+        self.line_lat, = self.ax3.plot([], [], label="One-Way Latency (ms)", color="#94e2d5", linewidth=2.0)
+        self.line_jit, = self.ax3.plot([], [], label="RFC 3550 Jitter (ms)", color="#89dceb", linewidth=1.5)
+        self.ax3.legend(facecolor="#1e1e2e", edgecolor="#45475a", labelcolor="#cdd6f4", loc="upper left", fontsize=8, ncol=2)
+
+        self.fig.subplots_adjust(top=0.92, bottom=0.10, left=0.08, right=0.96, hspace=0.35, wspace=0.18)
         layout.addWidget(self.canvas, stretch=6)
 
-        # Scrolling Event Log
+        # Scrolling SDN Event Log
         self.event_log = QTextEdit()
         self.event_log.setReadOnly(True)
-        self.event_log.setMaximumHeight(85)
-        self.event_log.setStyleSheet("background: #181825; color: #cdd6f4; font-family: 'Consolas', monospace; font-size: 10px;")
-        layout.addWidget(self.event_log, stretch=2)
+        self.event_log.setMaximumHeight(75)
+        self.event_log.setStyleSheet("background: #181825; color: #cdd6f4; font-family: 'Consolas', monospace; font-size: 10px; border: 1px solid #313244; border-radius: 4px;")
+        layout.addWidget(self.event_log, stretch=1)
 
-        # Simulation Internal State
-        self.sim_timer = QTimer(self)
-        self.sim_timer.timeout.connect(self._sim_tick)
-        self.sim_running = False
+        # Historical buffers
+        self.hist_time: Deque[float] = deque(maxlen=140)
+        self.hist_load_a: Deque[float] = deque(maxlen=140)
+        self.hist_load_b: Deque[float] = deque(maxlen=140)
+        self.hist_queue: Deque[float] = deque(maxlen=140)
+        self.hist_loss: Deque[float] = deque(maxlen=140)
+        self.hist_latency: Deque[float] = deque(maxlen=140)
+        self.hist_jitter: Deque[float] = deque(maxlen=140)
 
-        self.t_sim = 0.0
-        self.rtt = 0.05  # 50ms RTT
-        self.pipe_capacity = 36.0  # Buffer ceiling
+        self.auto_track = True
+        self._last_active_path = PATH_PRIMARY
 
-        # Capacity line
-        self.line_capacity = self.ax.axhline(self.pipe_capacity, color="#f9e2af", linestyle=":", label=f"Bottleneck Capacity ({int(self.pipe_capacity)} pkts)")
+        self.canvas.mpl_connect('button_press_event', self._on_user_interaction)
+        self.canvas.mpl_connect('scroll_event', self._on_user_interaction)
 
-        # Pre-allocate line artists
-        self.line_tahoe, = self.ax.plot([], [], label="TCP Tahoe (Drop to 1)", color="#f38ba8", linestyle="--", linewidth=2.0)
-        self.line_reno, = self.ax.plot([], [], label="TCP Reno (Fast Recovery)", color="#89b4fa", linewidth=2.0)
-        self.line_cubic, = self.ax.plot([], [], label="TCP CUBIC (Linux Default)", color="#cba6f7", linewidth=2.5)
-        self.line_sdn, = self.ax.plot([], [], label="SDN Dynamic Rerouting", color="#a6e3a1", linewidth=3.0)
+        self.event_log.append("[SYSTEM] SDN Dynamic Rerouting Analytics initialized. Polling OpenFlow port counters...")
 
-        self.legend = self.ax.legend(facecolor="#1e1e2e", edgecolor="#45475a", labelcolor="#cdd6f4", loc="upper left", fontsize=8)
-        self.fig.tight_layout()
+    def _on_user_interaction(self, event):
+        if self.toolbar.mode != "" and self.auto_track:
+            self._set_autotrack(False)
 
-        # States for Tahoe, Reno, Cubic, SDN
-        self.cwnd_tahoe = 1.0
-        self.ssthresh_tahoe = 24.0
+    def _toggle_autotrack(self):
+        self._set_autotrack(not self.auto_track)
+        if self.auto_track and self.hist_time:
+            xmin = self.hist_time[0]
+            xmax = max(self.hist_time[-1], xmin + 1.0)
+            for ax in [self.ax1, self.ax2, self.ax3]:
+                ax.set_xlim(xmin, xmax)
+            self.canvas.draw_idle()
 
-        self.cwnd_reno = 1.0
-        self.ssthresh_reno = 24.0
-
-        self.cwnd_cubic = 1.0
-        self.ssthresh_cubic = 24.0
-        self.w_max_cubic = 24.0
-        self.t_epoch_cubic = 0.0
-
-        self.cwnd_sdn = 1.0
-        self.ssthresh_sdn = 40.0
-
-        # Bounded deques for plot data history
-        self.hist_time: Deque[float] = deque(maxlen=120)
-        self.hist_tahoe: Deque[float] = deque(maxlen=120)
-        self.hist_reno: Deque[float] = deque(maxlen=120)
-        self.hist_cubic: Deque[float] = deque(maxlen=120)
-        self.hist_sdn: Deque[float] = deque(maxlen=120)
-
-        self._reset_sim()
-
-    def _on_mode_changed(self, idx: int):
-        self._redraw_plot()
-
-    def _toggle_sim(self):
-        if self.sim_running:
-            self.sim_timer.stop()
-            self.sim_running = False
-            self.btn_start.setText("▶ Resume Live Simulation")
-            self.btn_start.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold;")
+    def _set_autotrack(self, val: bool):
+        self.auto_track = val
+        if self.auto_track:
+            self.btn_autotrack.setText("🔒 Live Auto-Track: ON")
+            self.btn_autotrack.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; border-radius: 4px; padding: 4px 10px; font-size: 11px;")
         else:
-            self.sim_timer.start(50)  # 20 ticks per second
-            self.sim_running = True
-            self.btn_start.setText("⏸ Pause Live Simulation")
-            self.btn_start.setStyleSheet("background-color: #f9e2af; color: #11111b; font-weight: bold;")
+            self.btn_autotrack.setText("🔓 Auto-Track: PAUSED")
+            self.btn_autotrack.setStyleSheet("background-color: #fab387; color: #11111b; font-weight: bold; border-radius: 4px; padding: 4px 10px; font-size: 11px;")
 
-    def _reset_sim(self):
-        self.sim_timer.stop()
-        self.sim_running = False
-        self.btn_start.setText("▶ Run Live Simulation")
-        self.btn_start.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold;")
-
-        self.t_sim = 0.0
-        self.cwnd_tahoe = 1.0
-        self.ssthresh_tahoe = 24.0
-
-        self.cwnd_reno = 1.0
-        self.ssthresh_reno = 24.0
-
-        self.cwnd_cubic = 1.0
-        self.ssthresh_cubic = 24.0
-        self.w_max_cubic = 24.0
-        self.t_epoch_cubic = 0.0
-
-        self.cwnd_sdn = 1.0
-        self.ssthresh_sdn = 40.0
-
+    def _clear_history(self):
         self.hist_time.clear()
-        self.hist_tahoe.clear()
-        self.hist_reno.clear()
-        self.hist_cubic.clear()
-        self.hist_sdn.clear()
+        self.hist_load_a.clear()
+        self.hist_load_b.clear()
+        self.hist_queue.clear()
+        self.hist_loss.clear()
+        self.hist_latency.clear()
+        self.hist_jitter.clear()
+        self.line_load_a.set_data([], [])
+        self.line_load_b.set_data([], [])
+        self.line_queue.set_data([], [])
+        self.line_loss.set_data([], [])
+        self.line_lat.set_data([], [])
+        self.line_jit.set_data([], [])
+        self.canvas.draw_idle()
+        self.event_log.append("[SYSTEM] Telemetry history cleared.")
 
-        self.hist_time.append(0.0)
-        self.hist_tahoe.append(1.0)
-        self.hist_reno.append(1.0)
-        self.hist_cubic.append(1.0)
-        self.hist_sdn.append(1.0)
+    def update_sdn_telemetry(self, t: float, active_path: str, load_a: float, load_b: float,
+                             threshold: float, capacity: float, queue_pkts: float,
+                             loss_pct: float, latency_ms: float, jitter_ms: float,
+                             failover_latency_sec: Optional[float] = None):
+        self.hist_time.append(round(t, 2))
+        self.hist_load_a.append(round(load_a, 2))
+        self.hist_load_b.append(round(load_b, 2))
+        self.hist_queue.append(round(queue_pkts, 1))
+        self.hist_loss.append(round(loss_pct, 1))
+        self.hist_latency.append(round(latency_ms, 1))
+        self.hist_jitter.append(round(jitter_ms, 2))
 
-        self.event_log.clear()
-        self.event_log.append("[SYSTEM] Simulation initialized. Pipe capacity: 36 MSS. Press Start.")
-        self._redraw_plot()
-
-    def _trigger_manual_loss(self):
-        self.event_log.append(f"[EVENT T={self.t_sim:.2f}s] 💥 MANUAL PACKET LOSS TRIGGERED AT BOTTLENECK BUFFER!")
-        self._apply_loss()
-
-    def _apply_loss(self):
-        # 1. Tahoe: drops to 1 MSS
-        self.ssthresh_tahoe = max(2.0, self.cwnd_tahoe / 2.0)
-        self.cwnd_tahoe = 1.0
-        self.event_log.append(f"  -> [TCP Tahoe] Loss Detected! ssthresh={self.ssthresh_tahoe:.1f}, CWND DROPPED TO 1.0 MSS!")
-
-        # 2. Reno: Fast Recovery (halves)
-        self.ssthresh_reno = max(2.0, self.cwnd_reno / 2.0)
-        self.cwnd_reno = self.ssthresh_reno
-        self.event_log.append(f"  -> [TCP Reno] 3 Dup ACKs! Fast Recovery: ssthresh={self.ssthresh_reno:.1f}, CWND HALVED to {self.cwnd_reno:.1f} MSS.")
-
-        # 3. CUBIC: 30% reduction, begins cubic curve
-        self.w_max_cubic = self.cwnd_cubic
-        self.ssthresh_cubic = max(2.0, self.cwnd_cubic * 0.7)
-        self.cwnd_cubic = self.ssthresh_cubic
-        self.t_epoch_cubic = self.t_sim
-        self.event_log.append(f"  -> [TCP CUBIC] Congestion Event! W_max={self.w_max_cubic:.1f}, CWND set to {self.cwnd_cubic:.1f} MSS (retains 70%).")
-
-        # 4. SDN: Avoids drop!
-        self.event_log.append(f"  -> [SDN Reroute] SDN Controller dynamically steered flow to Path B before buffer drop! Zero loss sustained.")
-
-    def _sim_tick(self):
-        self.t_sim += self.rtt
-
-        # Check if natural pipe capacity exceeded
-        if self.cwnd_reno >= self.pipe_capacity or self.cwnd_tahoe >= self.pipe_capacity:
-            self.event_log.append(f"[BUFFER OVERFLOW T={self.t_sim:.2f}s] Bottleneck link queue full (36 pkts)! Dropping packets.")
-            self._apply_loss()
+        if load_a >= threshold:
+            self.line_load_a.set_color("#f38ba8")
         else:
-            # Advance Tahoe
-            if self.cwnd_tahoe < self.ssthresh_tahoe:
-                self.cwnd_tahoe += 1.0
+            self.line_load_a.set_color("#a6e3a1")
+
+        if active_path != self._last_active_path:
+            self._last_active_path = active_path
+            if active_path == PATH_ALTERNATE:
+                rec_str = f"{failover_latency_sec * 1000:.1f} ms" if failover_latency_sec else "instant"
+                self.event_log.append(
+                    f"⚡ [SDN FLOWMOD EVENT T={t:.1f}s] Congestion Detected on Path-A! "
+                    f"Switch S1 dynamically steered flow to Path-B. Failover latency: {rec_str}"
+                )
             else:
-                self.cwnd_tahoe += (1.0 / self.cwnd_tahoe)
+                self.event_log.append(f"⏮ [SDN RESTORATION T={t:.1f}s] Traffic reverted to Primary Path-A.")
 
-            # Advance Reno
-            if self.cwnd_reno < self.ssthresh_reno:
-                self.cwnd_reno += 1.0
-            else:
-                self.cwnd_reno += (1.0 / self.cwnd_reno)
+        is_rerouted = (active_path == PATH_ALTERNATE)
+        path_text = "Active: Path-B (DYNAMICALLY REROUTED)" if is_rerouted else "Active: Path-A (Primary)"
+        path_color = "#89b4fa" if is_rerouted else "#a6e3a1"
+        self.lbl_kpi_path.setText(path_text)
+        self.lbl_kpi_path.setStyleSheet(f"background: #181825; color: {path_color}; font-weight: bold; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid #313244;")
 
-            # Advance CUBIC
-            if self.cwnd_cubic < self.ssthresh_cubic:
-                self.cwnd_cubic += 1.0
-            else:
-                # W_cubic(t) = C*(t - K)^3 + W_max
-                C = 0.4
-                beta = 0.3
-                k_time = math.pow((self.w_max_cubic * beta) / C, 1.0 / 3.0)
-                t_since = self.t_sim - self.t_epoch_cubic
-                w_target = C * math.pow(t_since - k_time, 3.0) + self.w_max_cubic
-                incr = max(0.05, (w_target - self.cwnd_cubic) / max(1.0, self.cwnd_cubic))
-                self.cwnd_cubic += min(2.0, incr)
+        self.lbl_kpi_load.setText(f"Load: A={load_a:.1f}M | B={load_b:.1f}M")
+        self.lbl_kpi_queue.setText(f"Queue: {int(queue_pkts)} pkts (Loss: {loss_pct:.1f}%)")
 
-            # Advance SDN (Sustains growth, moves to alternate clean path)
-            if self.cwnd_sdn < self.ssthresh_sdn:
-                self.cwnd_sdn += 1.0
-            else:
-                self.cwnd_sdn += (1.0 / self.cwnd_sdn)
-            self.cwnd_sdn = min(50.0, self.cwnd_sdn)
+        self.line_load_a.set_data(self.hist_time, self.hist_load_a)
+        self.line_load_b.set_data(self.hist_time, self.hist_load_b)
+        self.line_queue.set_data(self.hist_time, self.hist_queue)
+        self.line_loss.set_data(self.hist_time, self.hist_loss)
+        self.line_lat.set_data(self.hist_time, self.hist_latency)
+        self.line_jit.set_data(self.hist_time, self.hist_jitter)
 
-        # Record history in bounded circular buffers
-        self.hist_time.append(round(self.t_sim, 2))
-        self.hist_tahoe.append(round(self.cwnd_tahoe, 2))
-        self.hist_reno.append(round(self.cwnd_reno, 2))
-        self.hist_cubic.append(round(self.cwnd_cubic, 2))
-        self.hist_sdn.append(round(self.cwnd_sdn, 2))
-
-        # Update labels
-        self.lbl_tahoe_val.setText(f"Tahoe CWND: {self.cwnd_tahoe:.1f} MSS")
-        self.lbl_reno_val.setText(f"Reno CWND: {self.cwnd_reno:.1f} MSS")
-        self.lbl_cubic_val.setText(f"CUBIC CWND: {self.cwnd_cubic:.1f} MSS")
-        self.lbl_sdn_val.setText(f"SDN CWND: {self.cwnd_sdn:.1f} MSS (Optimal)")
-
-        self._redraw_plot()
-
-    def _redraw_plot(self):
-        mode = self.combo_mode.currentIndex()
-        self.line_tahoe.set_visible(mode in (0, 1))
-        self.line_reno.set_visible(mode in (0, 2))
-        self.line_cubic.set_visible(mode in (0, 3))
-        self.line_sdn.set_visible(mode in (0, 4))
-
-        if self.hist_time:
-            self.line_tahoe.set_data(self.hist_time, self.hist_tahoe)
-            self.line_reno.set_data(self.hist_time, self.hist_reno)
-            self.line_cubic.set_data(self.hist_time, self.hist_cubic)
-            self.line_sdn.set_data(self.hist_time, self.hist_sdn)
-            self.ax.set_xlim(self.hist_time[0], max(self.hist_time[-1], self.hist_time[0] + 1.0))
+        if self.auto_track and self.hist_time:
+            xmin = self.hist_time[0]
+            xmax = max(self.hist_time[-1], xmin + 1.0)
+            for ax in [self.ax1, self.ax2, self.ax3]:
+                ax.set_xlim(xmin, xmax)
 
         self.canvas.draw_idle()
 
 
+class LivePacketConsoleWidget(QWidget):
+    """
+    Real-Time Datagram Stream & Mininet Packet Log Terminal.
+    Displays live UDP datagram arrivals, queue buffer depths, link routing hops,
+    forwarding decisions, and packet drops in real-time.
+    Translucent Watermark: *D1
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        bar = QHBoxLayout()
+
+        lbl_title = QLabel("📟 Live Mininet / Socket Packet Stream Console")
+        lbl_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        lbl_title.setStyleSheet("color: #89b4fa;")
+        bar.addWidget(lbl_title)
+
+        bar.addStretch()
+
+        self.combo_filter = QComboBox()
+        self.combo_filter.addItems([
+            "Filter: All Datagrams",
+            "Main Stream Only (H1->H2)",
+            "Cross Traffic Only (H3->H4)",
+            "Packet Drops Only",
+            "SDN Reroutes Only"
+        ])
+        bar.addWidget(self.combo_filter)
+
+        self.btn_pause = QPushButton("⏸ Pause")
+        self.btn_pause.setStyleSheet("background-color: #313244; color: #cdd6f4; padding: 4px 10px;")
+        self.btn_pause.clicked.connect(self._toggle_pause)
+        bar.addWidget(self.btn_pause)
+
+        self.btn_clear = QPushButton("🧹 Clear")
+        self.btn_clear.setStyleSheet("background-color: #313244; color: #cdd6f4; padding: 4px 10px;")
+        self.btn_clear.clicked.connect(self._clear_console)
+        bar.addWidget(self.btn_clear)
+
+        self.btn_external = QPushButton("🖥 Launch External OS Terminal Window")
+        self.btn_external.setStyleSheet("background-color: #fab387; color: #11111b; font-weight: bold; padding: 4px 12px;")
+        self.btn_external.clicked.connect(self._launch_external_terminal)
+        bar.addWidget(self.btn_external)
+
+        layout.addLayout(bar)
+
+        self.console = QPlainTextEdit()
+        self.console.setReadOnly(True)
+        self.console.setMaximumBlockCount(800)
+        self.console.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #0d1117;
+                color: #cdd6f4;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 11px;
+                border: 1px solid #313244;
+                border-radius: 6px;
+                padding: 6px;
+            }
+        """)
+        layout.addWidget(self.console, stretch=1)
+
+        bottom_bar = QHBoxLayout()
+        self.lbl_stats = QLabel("Streaming: Active | Port: 9000 -> 9001/9002 | Buffer: 800 events")
+        self.lbl_stats.setStyleSheet("color: #6c7086; font-size: 9px;")
+        bottom_bar.addWidget(self.lbl_stats)
+
+        bottom_bar.addStretch()
+        lbl_wm = QLabel("*D1")
+        lbl_wm.setStyleSheet("color: rgba(205, 214, 244, 0.45); font-weight: bold; font-size: 9px;")
+        bottom_bar.addWidget(lbl_wm)
+        layout.addLayout(bottom_bar)
+
+        self._packet_queue: queue.Queue = queue.Queue(maxsize=1500)
+        self.is_paused = False
+
+        self._drain_timer = QTimer(self)
+        self._drain_timer.timeout.connect(self._drain_queue)
+        self._drain_timer.start(35)
+
+        self._append_system_msg("[SYSTEM] Live packet console initialized. Listening to Mininet switch S1 ingress datagrams...")
+
+    def on_packet_event(self, evt: Dict[str, Any]):
+        try:
+            self._packet_queue.put_nowait(evt)
+        except queue.Full:
+            pass
+
+    def _toggle_pause(self):
+        self.is_paused = not self.is_paused
+        if self.is_paused:
+            self.btn_pause.setText("▶ Resume")
+            self.btn_pause.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 4px 10px;")
+            self._append_system_msg("[SYSTEM] Console output paused.")
+        else:
+            self.btn_pause.setText("⏸ Pause")
+            self.btn_pause.setStyleSheet("background-color: #313244; color: #cdd6f4; padding: 4px 10px;")
+            self._append_system_msg("[SYSTEM] Console output resumed.")
+
+    def _clear_console(self):
+        self.console.clear()
+        self._append_system_msg("[SYSTEM] Console cleared.")
+
+    def _append_system_msg(self, msg: str):
+        self.console.appendHtml(f"<span style='color: #89b4fa; font-weight: bold;'>{msg}</span>")
+
+    def _launch_external_terminal(self):
+        try:
+            if sys.platform == "win32":
+                subprocess.Popen([
+                    "cmd.exe", "/c", "start", "SDN / Mininet Real-Time Datagram Stream",
+                    sys.executable, "run.py", "--monitor"
+                ])
+            else:
+                subprocess.Popen(["x-terminal-emulator", "-e", f"{sys.executable} run.py --monitor"])
+            self._append_system_msg("[SYSTEM] External terminal launched successfully.")
+        except Exception as e:
+            self._append_system_msg(f"[ERROR] Failed to launch external terminal: {e}")
+
+    def _drain_queue(self):
+        if self.is_paused:
+            return
+
+        filt = self.combo_filter.currentIndex()
+        count = 0
+        lines = []
+
+        while not self._packet_queue.empty() and count < 35:
+            try:
+                evt = self._packet_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            count += 1
+            f_id = evt.get("flow_id", FLOW_MAIN)
+            is_dropped = evt.get("is_dropped", False)
+            is_rerouted = evt.get("is_rerouted", False)
+
+            if filt == 1 and f_id != FLOW_MAIN:
+                continue
+            if filt == 2 and f_id != FLOW_CROSS:
+                continue
+            if filt == 3 and not is_dropped:
+                continue
+            if filt == 4 and not is_rerouted:
+                continue
+
+            t_str = evt.get("time", "")
+            flow = evt.get("flow", "MAIN")
+            seq = evt.get("seq", 0)
+            path = evt.get("path", "Path-A")
+            q_str = evt.get("queue", "0/100")
+            size = evt.get("size", 1400)
+
+            if is_dropped:
+                line = (
+                    f"<span style='color: #6c7086;'>[{t_str}]</span> "
+                    f"<span style='color: #f38ba8; font-weight: bold;'>[{flow:>5} #{seq:>5}]</span> "
+                    f"<span style='color: #fab387;'>{path:>6}</span> | "
+                    f"<span style='color: #f38ba8;'>Q:{q_str:>6}</span> | "
+                    f"<span style='color: #f38ba8; font-weight: bold;'>DROPPED (Queue Overflow!)</span> "
+                    f"<span style='color: #585b70;'>({size}B)</span>"
+                )
+            elif is_rerouted:
+                line = (
+                    f"<span style='color: #6c7086;'>[{t_str}]</span> "
+                    f"<span style='color: #89b4fa; font-weight: bold;'>[{flow:>5} #{seq:>5}]</span> "
+                    f"<span style='color: #a6e3a1; font-weight: bold;'>{path:>6}</span> | "
+                    f"<span style='color: #a6e3a1;'>Q:{q_str:>6}</span> | "
+                    f"<span style='color: #89b4fa; font-weight: bold;'>FORWARDED (SDN Reroute: s1-&gt;s3-&gt;s4)</span> "
+                    f"<span style='color: #585b70;'>({size}B)</span>"
+                )
+            elif f_id == FLOW_MAIN:
+                line = (
+                    f"<span style='color: #6c7086;'>[{t_str}]</span> "
+                    f"<span style='color: #a6e3a1;'>[{flow:>5} #{seq:>5}]</span> "
+                    f"<span style='color: #cdd6f4;'>{path:>6}</span> | "
+                    f"<span style='color: #cdd6f4;'>Q:{q_str:>6}</span> | "
+                    f"<span style='color: #a6e3a1;'>FORWARDED (s1-&gt;s2-&gt;s4)</span> "
+                    f"<span style='color: #585b70;'>({size}B)</span>"
+                )
+            else:
+                line = (
+                    f"<span style='color: #6c7086;'>[{t_str}]</span> "
+                    f"<span style='color: #f9e2af;'>[{flow:>5} #{seq:>5}]</span> "
+                    f"<span style='color: #cdd6f4;'>{path:>6}</span> | "
+                    f"<span style='color: #f9e2af;'>Q:{q_str:>6}</span> | "
+                    f"<span style='color: #cdd6f4;'>FORWARDED (s1-&gt;s2-&gt;s4)</span> "
+                    f"<span style='color: #585b70;'>({size}B)</span>"
+                )
+            lines.append(line)
+
+        if lines:
+            for l in lines:
+                self.console.appendHtml(l)
+            self.console.moveCursor(QTextCursor.MoveOperation.End)
+
+
+class PopoutTabContainer(QWidget):
+    """
+    Wraps any view with:
+    - Clean header bar with title and '⧉ Pop Out Window' / '📥 Dock Back In' button
+    - Dynamic floating window creation with full resize, minimize, maximize
+    - Automatic dock-back on window close
+    """
+
+    def __init__(self, title: str, inner_widget: QWidget, tabs: QTabWidget, watermark: Optional[str] = None):
+        super().__init__()
+        self.tab_title = title
+        self.inner_widget = inner_widget
+        self.tabs = tabs
+        self.watermark_str = watermark
+        self.floating_window: Optional[QMainWindow] = None
+        self.original_index = -1
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header bar
+        header = QFrame()
+        header.setStyleSheet("background-color: #181825; border-bottom: 1px solid #313244; padding: 4px 8px;")
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(4, 2, 4, 2)
+
+        lbl_t = QLabel(title)
+        lbl_t.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        lbl_t.setStyleSheet("color: #89b4fa;")
+        h_layout.addWidget(lbl_t)
+
+        h_layout.addStretch()
+
+        self.btn_popout = QPushButton("⧉ Pop Out Window")
+        self.btn_popout.setStyleSheet("background-color: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 3px 10px; font-weight: bold; font-size: 11px;")
+        self.btn_popout.clicked.connect(self.toggle_popout)
+        h_layout.addWidget(self.btn_popout)
+
+        if watermark:
+            lbl_wm = QLabel(watermark)
+            lbl_wm.setStyleSheet("color: rgba(205, 214, 244, 0.45); font-weight: bold; font-size: 10px; padding: 2px;")
+            h_layout.addWidget(lbl_wm)
+
+        layout.addWidget(header)
+        layout.addWidget(inner_widget, stretch=1)
+
+    def toggle_popout(self):
+        if self.floating_window is None:
+            self.original_index = self.tabs.indexOf(self)
+            self.tabs.removeTab(self.original_index)
+            self.btn_popout.setText("📥 Dock Back In")
+            self.btn_popout.setStyleSheet("background-color: #89b4fa; color: #11111b; font-weight: bold; border-radius: 4px; padding: 3px 10px; font-size: 11px;")
+
+            fw = QMainWindow()
+            fw.setWindowTitle(self.tab_title)
+            fw.resize(1100, 750)
+            fw.setCentralWidget(self)
+            fw.closeEvent = self._on_float_close
+            fw.show()
+            self.floating_window = fw
+        else:
+            self.dock_back()
+
+    def _on_float_close(self, event):
+        self.dock_back()
+        event.accept()
+
+    def dock_back(self):
+        if self.floating_window is not None:
+            fw = self.floating_window
+            self.floating_window = None
+            self.btn_popout.setText("⧉ Pop Out Window")
+            self.btn_popout.setStyleSheet("background-color: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 3px 10px; font-weight: bold; font-size: 11px;")
+            idx = min(self.original_index if self.original_index >= 0 else self.tabs.count(), self.tabs.count())
+            self.tabs.insertTab(idx, self, self.tab_title)
+            self.tabs.setCurrentIndex(idx)
+            fw.deleteLater()
+
+
 class MasterSDNGUI(QMainWindow):
     """
-    Master Application Window coordinating Animated Topology,
-    OpenFlow Flow Table Inspector, Category 2 controls, and live TCP simulation.
+    Master Application Window coordinating:
+    - High-DPI Crisp Vector Graphics
+    - Dynamic Resizing Architecture via QSplitter & QScrollArea
+    - NOC Digital Telemetry KPI Cards
+    - 4 Master Workspace Views with Instant Pop-out / Dock-in capability
+    - Animated Topology Canvas + Real-Time Telemetry Plots
+    - Dedicated SDN Dynamic Rerouting Analytics Dashboard
+    - Live Mininet Datagram Terminal Console
+    - Automated Comparative Benchmark Runner
     """
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SDN Congestion Detection & Dynamic Rerouting System (Topic #27)")
-        self.resize(1300, 880)
+        self.resize(1440, 920)
+
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
-            QWidget { color: #cdd6f4; font-family: 'Segoe UI', Arial; }
+            QWidget { color: #cdd6f4; font-family: 'Segoe UI', -apple-system, sans-serif; font-size: 12px; }
             QTabWidget::pane { border: 1px solid #313244; background: #181825; border-radius: 6px; }
-            QTabBar::tab { background: #313244; padding: 10px 24px; margin-right: 4px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
+            QTabBar::tab { background: #313244; padding: 9px 20px; margin-right: 4px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; }
             QTabBar::tab:selected { background: #89b4fa; color: #11111b; font-weight: bold; }
-            QGroupBox { border: 1px solid #45475a; border-radius: 6px; margin-top: 10px; font-weight: bold; padding: 10px; }
+            QGroupBox { border: 1px solid #45475a; border-radius: 6px; margin-top: 8px; font-weight: bold; padding: 8px; }
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #89b4fa; }
-            QPushButton { background-color: #313244; border: 1px solid #45475a; border-radius: 6px; padding: 7px 14px; font-weight: bold; }
+            QPushButton { background-color: #313244; border: 1px solid #45475a; border-radius: 6px; padding: 6px 12px; font-weight: bold; }
             QPushButton:hover { background-color: #45475a; }
             QSlider::groove:horizontal { height: 6px; background: #313244; border-radius: 3px; }
             QSlider::sub-page:horizontal { background: #89b4fa; border-radius: 3px; }
             QSlider::handle:horizontal { background: #b4befe; width: 16px; height: 16px; margin: -5px 0; border-radius: 8px; }
+            QMenuBar { background-color: #181825; color: #cdd6f4; border-bottom: 1px solid #313244; padding: 2px; }
+            QMenuBar::item { background: transparent; padding: 4px 10px; }
+            QMenuBar::item:selected { background: #313244; border-radius: 4px; }
+            QMenu { background-color: #181825; color: #cdd6f4; border: 1px solid #45475a; }
+            QMenu::item:selected { background-color: #89b4fa; color: #11111b; }
+            QSplitter::handle { background-color: #313244; }
+            QSplitter::handle:hover { background-color: #89b4fa; }
         """)
 
-        # Start background core modules
+        # Core networking backends
         self.controller = SDNController(congestion_threshold_mbps=CONGESTION_THRESHOLD_MBPS, adaptive_routing_enabled=True)
         self.controller.start()
 
@@ -666,34 +946,78 @@ class MasterSDNGUI(QMainWindow):
         self.main_sender: Optional[UDPSender] = None
         self.is_cross_burst_active = False
 
-        # Dirty-check cache to prevent redundant UI relayouts
         self._last_flow_text = ""
         self._last_active_path_status = ""
         self._last_recovery_time_sec = None
 
-        # Build UI
-        self._init_ui()
+        self._init_menu_bar()
+        self._init_header_bar()
+        self._init_main_workspace()
 
-        # Telemetry Timer (4 Hz / 250ms interval - optimal responsiveness without CPU churn)
+        # Connect packet console callback to emulator
+        self.emulator.register_packet_callback(self.console_widget.on_packet_event)
+
+        # Telemetry Timer (4 Hz / 250ms interval)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._refresh_telemetry)
         self.timer.start(250)
 
         self.start_epoch = time.time()
 
-    def _init_ui(self):
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
+    def _init_menu_bar(self):
+        menubar = self.menuBar()
 
-        # Top Alert & State Header
-        header = QFrame()
-        header.setStyleSheet("background-color: #181825; border-radius: 8px; padding: 6px;")
-        h_layout = QHBoxLayout(header)
+        menu_file = menubar.addMenu("&File")
+        act_term = QAction("🖥 Launch External OS Terminal Monitor (CMD)", self)
+        act_term.triggered.connect(self._launch_external_terminal)
+        menu_file.addAction(act_term)
 
-        title_lbl = QLabel("SDN CONGESTION DETECTION & TRAFFIC REROUTING")
-        title_lbl.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        act_reset = QAction("🔄 Reset Network Topology", self)
+        act_reset.triggered.connect(self._reset_topology)
+        menu_file.addAction(act_reset)
+
+        menu_file.addSeparator()
+        act_exit = QAction("Exit", self)
+        act_exit.triggered.connect(self.close)
+        menu_file.addAction(act_exit)
+
+        menu_view = menubar.addMenu("&View")
+        act_pop_all = QAction("⧉ Pop Out All Windows (Multi-Monitor Mode)", self)
+        act_pop_all.triggered.connect(self._popout_all_windows)
+        menu_view.addAction(act_pop_all)
+
+        act_dock_all = QAction("📥 Dock All Windows Back In", self)
+        act_dock_all.triggered.connect(self._dock_all_windows)
+        menu_view.addAction(act_dock_all)
+
+        act_reset_view = QAction("🔄 Reset Default View", self)
+        act_reset_view.triggered.connect(self._reset_default_view)
+        menu_view.addAction(act_reset_view)
+
+        menu_sim = menubar.addMenu("&Simulation")
+        act_stream = QAction("▶ Start / Stop Main Stream", self)
+        act_stream.triggered.connect(self._toggle_main_stream)
+        menu_sim.addAction(act_stream)
+
+        act_burst = QAction("⚡ Inject Congestion Burst (Path A)", self)
+        act_burst.triggered.connect(self._inject_congestion)
+        menu_sim.addAction(act_burst)
+
+        act_bench = QAction("📊 Run Automated Comparative Benchmark", self)
+        act_bench.triggered.connect(self._run_benchmark_async)
+        menu_sim.addAction(act_bench)
+
+    def _init_header_bar(self):
+        header_widget = QWidget()
+        h_layout = QHBoxLayout(header_widget)
+        h_layout.setContentsMargins(12, 6, 12, 6)
+
+        title_lbl = QLabel("SDN CONGESTION DETECTION & DYNAMIC REROUTING SYSTEM (TOPIC #27)")
+        title_lbl.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         title_lbl.setStyleSheet("color: #89b4fa;")
         h_layout.addWidget(title_lbl)
+
+        h_layout.addStretch()
 
         self.lbl_active_path_status = QLabel("ACTIVE PATH: Path-A (Primary)")
         self.lbl_active_path_status.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
@@ -701,230 +1025,365 @@ class MasterSDNGUI(QMainWindow):
         h_layout.addWidget(self.lbl_active_path_status)
 
         self.lbl_recovery_time = QLabel("Failover Latency: -- ms")
-        self.lbl_recovery_time.setFont(QFont("Segoe UI", 10))
-        self.lbl_recovery_time.setStyleSheet("color: #fab387; font-weight: bold;")
+        self.lbl_recovery_time.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.lbl_recovery_time.setStyleSheet("color: #fab387; padding: 4px 8px;")
         h_layout.addWidget(self.lbl_recovery_time)
 
-        main_layout.addWidget(header)
+        btn_term_top = QPushButton("🖥 Live OS Terminal")
+        btn_term_top.setStyleSheet("background-color: #fab387; color: #11111b; font-weight: bold; padding: 4px 12px;")
+        btn_term_top.clicked.connect(self._launch_external_terminal)
+        h_layout.addWidget(btn_term_top)
 
-        # Tabs
-        tabs = QTabWidget()
-        tabs.addTab(self._create_tab_topology(), "🌐 Live Visual Topology & SDN Controls")
-        tabs.addTab(LiveTCPCongestionWidget(), "📈 Live TCP Congestion: Tahoe vs Reno vs CUBIC")
-        tabs.addTab(self._create_tab_benchmark(), "📊 Benchmark & Evaluation")
-        main_layout.addWidget(tabs)
+        top_toolbar = QToolBar("Header", self)
+        top_toolbar.setMovable(False)
+        top_toolbar.setFloatable(False)
+        top_toolbar.addWidget(header_widget)
+        top_toolbar.setStyleSheet("background-color: #181825; border-bottom: 1px solid #313244;")
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, top_toolbar)
 
-        self.setCentralWidget(main_widget)
+    def _init_main_workspace(self):
+        """Builds the 4 master responsive views inside an expansive tabbed workspace."""
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
 
-    def _create_tab_topology(self) -> QWidget:
+        self.popout_containers: List[PopoutTabContainer] = []
+
+        # View 1: Topology & Live Operations
+        view_topo = self._create_view_topology_operations()
+        c1 = PopoutTabContainer("🌐 Live Visual Topology & Stream Control", view_topo, self.tabs, watermark="*D1")
+        self.tabs.addTab(c1, "🌐 Live Visual Topology & Stream Control")
+        self.popout_containers.append(c1)
+
+        # View 2: Dedicated SDN Dynamic Rerouting Analytics Dashboard
+        self.sdn_analytics_widget = LiveSDNReroutingAnalyticsWidget(self)
+        c2 = PopoutTabContainer("📊 SDN Dynamic Rerouting Analytics & Dual-Path Telemetry", self.sdn_analytics_widget, self.tabs, watermark="*D2")
+        self.tabs.addTab(c2, "📊 SDN Dynamic Rerouting Analytics & Dual-Path Telemetry")
+        self.popout_containers.append(c2)
+
+        # View 3: Real-Time Datagram Stream Terminal
+        self.console_widget = LivePacketConsoleWidget()
+        c3 = PopoutTabContainer("📟 Live Mininet Packet Stream Terminal", self.console_widget, self.tabs, watermark="*D1")
+        self.tabs.addTab(c3, "📟 Live Mininet Packet Stream Terminal")
+        self.popout_containers.append(c3)
+
+        # View 4: Automated Benchmark & Performance Evaluation
+        self.bench_widget = self._create_tab_benchmark()
+        c4 = PopoutTabContainer("⚡ Automated Benchmark & Performance Evaluation", self.bench_widget, self.tabs, watermark="*D2")
+        self.tabs.addTab(c4, "⚡ Automated Benchmark & Performance Evaluation")
+        self.popout_containers.append(c4)
+
+    def _create_view_topology_operations(self) -> QWidget:
         widget = QWidget()
-        layout = QHBoxLayout(widget)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(6, 6, 6, 6)
 
-        # Left Column: Animated Topology Canvas + Live Flow Table + Live Plots
-        left_col = QVBoxLayout()
+        # Master Horizontal Splitter (Left: Topology + Plot | Right: Controls + Telemetry NOC)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left Column: Vertical Splitter between Topology and Live Throughput/Loss Plot
+        self.left_splitter = QSplitter(Qt.Orientation.Vertical)
         self.topo_canvas = AnimatedTopologyCanvas()
-        left_col.addWidget(self.topo_canvas, stretch=5)
+        self.left_splitter.addWidget(self.topo_canvas)
 
-        # OpenFlow 1.3 Flow Table Inspector Box
-        grp_flow_table = QGroupBox("Switch S1 Live OpenFlow 1.3 Flow Table")
-        ft_layout = QVBoxLayout(grp_flow_table)
-        self.lbl_flow_table = QLabel()
-        self.lbl_flow_table.setFont(QFont("Consolas", 9))
-        self.lbl_flow_table.setStyleSheet("background: #11111b; color: #a6e3a1; padding: 8px; border-radius: 4px;")
-        ft_layout.addWidget(self.lbl_flow_table)
+        self.plot_container = RealtimePlotContainer()
+        self.left_splitter.addWidget(self.plot_container)
 
-        # Translucent Watermark: *D2 (Dynamic SDN Functionality)
-        lbl_wm_ft = QLabel("*D2")
-        lbl_wm_ft.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lbl_wm_ft.setStyleSheet("color: rgba(205, 214, 244, 0.4); font-size: 8px; font-weight: bold; margin-top: -6px;")
-        ft_layout.addWidget(lbl_wm_ft)
+        self.left_splitter.setStretchFactor(0, 5)
+        self.left_splitter.setStretchFactor(1, 4)
+        self.left_splitter.setSizes([380, 280])
+        self.main_splitter.addWidget(self.left_splitter)
 
-        left_col.addWidget(grp_flow_table, stretch=2)
+        # Right Column: Clean scrollable operations NOC panel
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        right_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
-        self.plot_canvas = RealtimePlotCanvas()
-        left_col.addWidget(self.plot_canvas, stretch=4)
-        layout.addLayout(left_col, stretch=6)
+        right_content = QWidget()
+        r_layout = QVBoxLayout(right_content)
+        r_layout.setContentsMargins(4, 0, 8, 0)
+        r_layout.setSpacing(6)
 
-        # Right Column: Controls & Digital Gauges
-        right_col = QVBoxLayout()
+        # 1. Network Parameters & Stream Controls
+        grp_ctrl = self._create_controls_box()
+        r_layout.addWidget(grp_ctrl)
 
-        # Hardware & Link Controls
-        grp_ctrl = QGroupBox("Network Parameters & Controls")
-        grid_ctrl = QGridLayout(grp_ctrl)
+        # 2. Modern NOC Telemetry KPI Cards
+        grp_kpi = self._create_telemetry_kpi_box()
+        r_layout.addWidget(grp_kpi)
 
-        # Queue limit slider (10 to 100)
-        self.lbl_queue = QLabel("Queue Limit: 100 pkts")
+        # 3. Switch S1 Active Flow Table
+        grp_flow = self._create_flow_table_box()
+        r_layout.addWidget(grp_flow)
+
+        right_scroll.setWidget(right_content)
+        self.main_splitter.addWidget(right_scroll)
+
+        # 840px Left, 520px Right initial ratio
+        self.main_splitter.setStretchFactor(0, 6)
+        self.main_splitter.setStretchFactor(1, 4)
+        self.main_splitter.setSizes([840, 520])
+
+        layout.addWidget(self.main_splitter)
+        return widget
+
+    def _create_controls_box(self) -> QGroupBox:
+        grp = QGroupBox("Network Parameters & Stream Controls")
+        grid = QGridLayout(grp)
+        grid.setSpacing(6)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 0)
+
+        # Queue Limit Slider
+        grid.addWidget(QLabel("Queue Limit:"), 0, 0)
         self.slider_queue = QSlider(Qt.Orientation.Horizontal)
         self.slider_queue.setRange(10, 100)
         self.slider_queue.setValue(100)
         self.slider_queue.valueChanged.connect(self._on_queue_changed)
-        grid_ctrl.addWidget(self.lbl_queue, 0, 0)
-        grid_ctrl.addWidget(self.slider_queue, 0, 1)
+        grid.addWidget(self.slider_queue, 0, 1)
+        self.lbl_val_queue = QLabel("100 pkts")
+        self.lbl_val_queue.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        grid.addWidget(self.lbl_val_queue, 0, 2)
 
-        # Bottleneck Bandwidth slider (2 to 10)
-        self.lbl_bw = QLabel("Bottleneck Bandwidth: 10.0 Mbps")
+        # Bottleneck Bandwidth Slider
+        grid.addWidget(QLabel("Bottleneck BW:"), 1, 0)
         self.slider_bw = QSlider(Qt.Orientation.Horizontal)
         self.slider_bw.setRange(2, 10)
         self.slider_bw.setValue(10)
         self.slider_bw.valueChanged.connect(self._on_bw_changed)
-        grid_ctrl.addWidget(self.lbl_bw, 1, 0)
-        grid_ctrl.addWidget(self.slider_bw, 1, 1)
+        grid.addWidget(self.slider_bw, 1, 1)
+        self.lbl_val_bw = QLabel("10.0 Mbps")
+        self.lbl_val_bw.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        grid.addWidget(self.lbl_val_bw, 1, 2)
 
-        # Host Sending Rate slider (1 to 10)
-        self.lbl_host_rate = QLabel("Main Sending Rate: 6.0 Mbps")
+        # Host Sending Rate Slider
+        grid.addWidget(QLabel("Main Send Rate:"), 2, 0)
         self.slider_host_rate = QSlider(Qt.Orientation.Horizontal)
         self.slider_host_rate.setRange(1, 10)
         self.slider_host_rate.setValue(6)
         self.slider_host_rate.valueChanged.connect(self._on_host_rate_changed)
-        grid_ctrl.addWidget(self.lbl_host_rate, 2, 0)
-        grid_ctrl.addWidget(self.slider_host_rate, 2, 1)
+        grid.addWidget(self.slider_host_rate, 2, 1)
+        self.lbl_val_host = QLabel("6.0 Mbps")
+        self.lbl_val_host.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        grid.addWidget(self.lbl_val_host, 2, 2)
 
-        # Cross-traffic burst rate slider (1 to 10)
-        self.lbl_cross_rate = QLabel("Cross-Traffic Burst: 7.0 Mbps")
+        # Cross Burst Rate Slider
+        grid.addWidget(QLabel("Cross Burst Rate:"), 3, 0)
         self.slider_cross_rate = QSlider(Qt.Orientation.Horizontal)
         self.slider_cross_rate.setRange(1, 10)
         self.slider_cross_rate.setValue(7)
         self.slider_cross_rate.valueChanged.connect(self._on_cross_rate_changed)
-        grid_ctrl.addWidget(self.lbl_cross_rate, 3, 0)
-        grid_ctrl.addWidget(self.slider_cross_rate, 3, 1)
+        grid.addWidget(self.slider_cross_rate, 3, 1)
+        self.lbl_val_cross = QLabel("7.0 Mbps")
+        self.lbl_val_cross.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        grid.addWidget(self.lbl_val_cross, 3, 2)
 
-        # Stream Control Buttons
+        # Primary Action Buttons
         self.btn_toggle_sender = QPushButton("▶ Start Main UDP Stream")
-        self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b;")
+        self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 7px;")
         self.btn_toggle_sender.clicked.connect(self._toggle_main_stream)
-        grid_ctrl.addWidget(self.btn_toggle_sender, 4, 0, 1, 2)
+        grid.addWidget(self.btn_toggle_sender, 4, 0, 1, 3)
 
         self.btn_inject_congestion = QPushButton("⚡ Inject Congestion (7M Burst on Path A)")
-        self.btn_inject_congestion.setStyleSheet("background-color: #f38ba8; color: #11111b;")
+        self.btn_inject_congestion.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold; padding: 7px;")
         self.btn_inject_congestion.clicked.connect(self._inject_congestion)
-        grid_ctrl.addWidget(self.btn_inject_congestion, 5, 0, 1, 2)
+        grid.addWidget(self.btn_inject_congestion, 5, 0, 1, 3)
 
-        # Manual / Auto Rerouting Override Controls
-        btn_force_b = QPushButton("🔀 Force Reroute to Path B")
+        # Reroute Overrides in proportional HBox
+        row6 = QHBoxLayout()
+        btn_force_b = QPushButton("🔀 Force Path B")
         btn_force_b.clicked.connect(lambda: self._manual_reroute(PATH_ALTERNATE))
-        grid_ctrl.addWidget(btn_force_b, 6, 0)
+        row6.addWidget(btn_force_b)
 
-        btn_force_a = QPushButton("⏮ Revert to Path A")
+        btn_force_a = QPushButton("⏮ Revert Path A")
         btn_force_a.clicked.connect(lambda: self._manual_reroute(PATH_PRIMARY))
-        grid_ctrl.addWidget(btn_force_a, 6, 1)
+        row6.addWidget(btn_force_a)
+        grid.addLayout(row6, 6, 0, 1, 3)
 
-        self.btn_toggle_sdn = QPushButton("Auto-SDN Dynamic Rerouting: ON")
-        self.btn_toggle_sdn.setStyleSheet("background-color: #89b4fa; color: #11111b;")
+        # Auto-SDN & Reset in proportional HBox
+        row7 = QHBoxLayout()
+        self.btn_toggle_sdn = QPushButton("Auto-SDN Rerouting: ON")
+        self.btn_toggle_sdn.setStyleSheet("background-color: #89b4fa; color: #11111b; font-weight: bold;")
         self.btn_toggle_sdn.clicked.connect(self._toggle_sdn_mode)
-        grid_ctrl.addWidget(self.btn_toggle_sdn, 7, 0)
+        row7.addWidget(self.btn_toggle_sdn, 2)
 
-        self.btn_reset_topo = QPushButton("🔄 Reset / Stop Topology")
-        self.btn_reset_topo.setStyleSheet("background-color: #eba0ac; color: #11111b;")
+        self.btn_reset_topo = QPushButton("🔄 Reset Topology")
+        self.btn_reset_topo.setStyleSheet("background-color: #eba0ac; color: #11111b; font-weight: bold;")
         self.btn_reset_topo.clicked.connect(self._reset_topology)
-        grid_ctrl.addWidget(self.btn_reset_topo, 7, 1)
+        row7.addWidget(self.btn_reset_topo, 1)
+        grid.addLayout(row7, 7, 0, 1, 3)
 
         self.rate_adaptation_enabled = False
         self.btn_toggle_rate_adapt = QPushButton("UDP Rate Adaptation: OFF")
         self.btn_toggle_rate_adapt.setStyleSheet("background-color: #313244; color: #cdd6f4;")
         self.btn_toggle_rate_adapt.clicked.connect(self._toggle_rate_adapt)
-        grid_ctrl.addWidget(self.btn_toggle_rate_adapt, 8, 0, 1, 2)
+        grid.addWidget(self.btn_toggle_rate_adapt, 8, 0, 1, 3)
 
-        # Translucent Watermark: *D1 (Mininet + SDN Integration)
-        lbl_wm_ctrl = QLabel("*D1")
-        lbl_wm_ctrl.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lbl_wm_ctrl.setStyleSheet("color: rgba(205, 214, 244, 0.4); font-size: 8px; font-weight: bold;")
-        grid_ctrl.addWidget(lbl_wm_ctrl, 9, 1)
+        return grp
 
-        right_col.addWidget(grp_ctrl)
+    def _create_telemetry_kpi_box(self) -> QGroupBox:
+        grp = QGroupBox("Category 2: Real-Time Socket Telemetry")
+        layout = QVBoxLayout(grp)
+        layout.setSpacing(6)
 
-        # Category 2 Telemetry Digital Readouts
-        grp_tel = QGroupBox("Category 2: Real-Time Socket Telemetry")
-        grid_tel = QGridLayout(grp_tel)
+        grid = QGridLayout()
+        grid.setSpacing(6)
 
+        def make_kpi_card(title: str, val_lbl: QLabel, sub_lbl: Optional[QLabel] = None, border_color: str = "#89b4fa"):
+            card = QFrame()
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #181825;
+                    border: 1px solid #313244;
+                    border-left: 4px solid {border_color};
+                    border-radius: 6px;
+                    padding: 5px 8px;
+                }}
+            """)
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(2, 2, 2, 2)
+            cl.setSpacing(1)
+
+            t = QLabel(title)
+            t.setStyleSheet("color: #a6adc8; font-size: 9px; font-weight: bold;")
+            cl.addWidget(t)
+
+            val_lbl.setStyleSheet(f"color: {border_color}; font-size: 15px; font-weight: bold;")
+            cl.addWidget(val_lbl)
+
+            if sub_lbl:
+                sub_lbl.setStyleSheet("color: #6c7086; font-size: 8px;")
+                cl.addWidget(sub_lbl)
+            return card
+
+        # Card 1: Throughput
         self.lbl_val_thpt = QLabel("0.00 Mbps")
-        self.lbl_val_thpt.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        self.lbl_val_thpt.setStyleSheet("color: #a6e3a1;")
-        grid_tel.addWidget(QLabel("Live Throughput:"), 0, 0)
-        grid_tel.addWidget(self.lbl_val_thpt, 0, 1)
+        self.lbl_sub_goodput = QLabel("Goodput: 0.00 Mbps")
+        card_thpt = make_kpi_card("LIVE THROUGHPUT", self.lbl_val_thpt, self.lbl_sub_goodput, "#a6e3a1")
+        grid.addWidget(card_thpt, 0, 0)
 
+        # Card 2: Packet Loss
         self.lbl_val_loss = QLabel("0.0 %")
-        self.lbl_val_loss.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        self.lbl_val_loss.setStyleSheet("color: #f38ba8;")
-        grid_tel.addWidget(QLabel("Packet Loss Rate:"), 1, 0)
-        grid_tel.addWidget(self.lbl_val_loss, 1, 1)
+        self.lbl_sub_loss = QLabel("Window: 0.0%")
+        card_loss = make_kpi_card("PACKET LOSS RATE", self.lbl_val_loss, self.lbl_sub_loss, "#f38ba8")
+        grid.addWidget(card_loss, 0, 1)
 
+        # Card 3: One-Way Latency
         self.lbl_val_lat = QLabel("0.0 ms")
-        self.lbl_val_lat.setFont(QFont("Segoe UI", 12))
-        grid_tel.addWidget(QLabel("One-Way Latency:"), 2, 0)
-        grid_tel.addWidget(self.lbl_val_lat, 2, 1)
+        card_lat = make_kpi_card("ONE-WAY LATENCY", self.lbl_val_lat, None, "#89b4fa")
+        grid.addWidget(card_lat, 1, 0)
 
+        # Card 4: RFC 3550 Jitter
         self.lbl_val_jit = QLabel("0.0 ms")
-        self.lbl_val_jit.setFont(QFont("Segoe UI", 12))
-        grid_tel.addWidget(QLabel("RFC 3550 Jitter:"), 3, 0)
-        grid_tel.addWidget(self.lbl_val_jit, 3, 1)
+        card_jit = make_kpi_card("RFC 3550 JITTER", self.lbl_val_jit, None, "#94e2d5")
+        grid.addWidget(card_jit, 1, 1)
 
-        self.lbl_val_counts = QLabel("Recv: 0 | Lost: 0")
-        self.lbl_val_counts.setFont(QFont("Segoe UI", 10))
-        grid_tel.addWidget(QLabel("Packet Counters:"), 4, 0)
-        grid_tel.addWidget(self.lbl_val_counts, 4, 1)
+        layout.addLayout(grid)
 
-        # Translucent Watermark: *D1 (TCP/UDP Socket Implementation)
-        lbl_wm_tel = QLabel("*D1")
-        lbl_wm_tel.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lbl_wm_tel.setStyleSheet("color: rgba(205, 214, 244, 0.4); font-size: 8px; font-weight: bold;")
-        grid_tel.addWidget(lbl_wm_tel, 5, 1)
+        # Full-width Card 5: Packet Counters
+        self.lbl_val_counts = QLabel("Recv: 0 | Lost: 0 | Total: 0")
+        card_counts = make_kpi_card("PACKET COUNTERS", self.lbl_val_counts, None, "#cba6f7")
+        layout.addWidget(card_counts)
 
-        right_col.addWidget(grp_tel)
-        layout.addLayout(right_col, stretch=4)
+        # Watermark
+        lbl_wm = QLabel("*D1")
+        lbl_wm.setAlignment(Qt.AlignmentFlag.AlignRight)
+        lbl_wm.setStyleSheet("color: rgba(205, 214, 244, 0.45); font-weight: bold; font-size: 9px;")
+        layout.addWidget(lbl_wm)
 
-        return widget
+        return grp
+
+    def _create_flow_table_box(self) -> QGroupBox:
+        grp = QGroupBox("Switch S1 Live OpenFlow 1.3 Flow Table")
+        layout = QVBoxLayout(grp)
+        layout.setContentsMargins(6, 6, 6, 6)
+
+        self.lbl_flow_table = QLabel()
+        self.lbl_flow_table.setFont(QFont("Consolas", 9))
+        self.lbl_flow_table.setStyleSheet("background: #11111b; color: #a6e3a1; padding: 6px; border-radius: 4px; border: 1px solid #313244;")
+        layout.addWidget(self.lbl_flow_table)
+
+        lbl_wm = QLabel("*D2")
+        lbl_wm.setAlignment(Qt.AlignmentFlag.AlignRight)
+        lbl_wm.setStyleSheet("color: rgba(205, 214, 244, 0.45); font-weight: bold; font-size: 8px;")
+        layout.addWidget(lbl_wm)
+
+        return grp
 
     def _create_tab_benchmark(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         top_bar = QHBoxLayout()
         btn_run_bench = QPushButton("⚡ Execute Automated Comparative Benchmark (Static vs Dynamic)")
-        btn_run_bench.setStyleSheet("background: #fab387; color: #11111b; font-weight: bold; padding: 10px;")
+        btn_run_bench.setStyleSheet("background: #fab387; color: #11111b; font-weight: bold; padding: 8px 16px;")
         btn_run_bench.clicked.connect(self._run_benchmark_async)
         top_bar.addWidget(btn_run_bench)
 
         self.lbl_bench_status = QLabel("Status: Ready")
+        self.lbl_bench_status.setStyleSheet("color: #a6adc8; font-weight: bold;")
         top_bar.addWidget(self.lbl_bench_status)
+        top_bar.addStretch()
         layout.addLayout(top_bar)
 
         self.kpi_display = QLabel("Click the button above to run the 30-second automated benchmark comparison.")
-        self.kpi_display.setStyleSheet("background: #181825; border-radius: 6px; padding: 16px; font-family: 'Consolas', monospace;")
+        self.kpi_display.setStyleSheet("background: #181825; border-radius: 6px; padding: 14px; font-family: 'Consolas', monospace; font-size: 11px; border: 1px solid #313244;")
         layout.addWidget(self.kpi_display)
 
-        # Translucent Watermark: *D2 (Performance Evaluation & Comparison)
-        lbl_wm_bm = QLabel("*D2")
-        lbl_wm_bm.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lbl_wm_bm.setStyleSheet("color: rgba(205, 214, 244, 0.4); font-size: 9px; font-weight: bold; padding: 4px;")
-        layout.addWidget(lbl_wm_bm)
+        lbl_wm = QLabel("*D2")
+        lbl_wm.setAlignment(Qt.AlignmentFlag.AlignRight)
+        lbl_wm.setStyleSheet("color: rgba(205, 214, 244, 0.45); font-weight: bold; font-size: 9px;")
+        layout.addWidget(lbl_wm)
 
         return widget
 
-    # Event handlers
+    def _popout_all_windows(self):
+        for c in self.popout_containers:
+            if c.floating_window is None:
+                c.toggle_popout()
+
+    def _dock_all_windows(self):
+        for c in self.popout_containers:
+            if c.floating_window is not None:
+                c.dock_back()
+
+    def _reset_default_view(self):
+        self._dock_all_windows()
+        self.tabs.setCurrentIndex(0)
+        self.main_splitter.setStretchFactor(0, 6)
+        self.main_splitter.setStretchFactor(1, 4)
+        self.left_splitter.setStretchFactor(0, 5)
+        self.left_splitter.setStretchFactor(1, 4)
+
+    def _launch_external_terminal(self):
+        self.console_widget._launch_external_terminal()
+
     def _on_queue_changed(self, val):
-        self.lbl_queue.setText(f"Queue Limit: {val} pkts")
+        self.lbl_val_queue.setText(f"{val} pkts")
         self.emulator.link_path_a.set_max_queue(val)
         self.emulator.link_path_b.set_max_queue(val)
         self.topo_canvas.queue_limit = val
 
     def _on_bw_changed(self, val):
-        self.lbl_bw.setText(f"Bottleneck Bandwidth: {val}.0 Mbps")
-        self.emulator.link_path_a.capacity_mbps = float(val)
-        self.emulator.link_path_b.capacity_mbps = float(val)
+        self.lbl_val_bw.setText(f"{val}.0 Mbps")
+        self.emulator.link_path_a.set_capacity_mbps(float(val))
+        self.emulator.link_path_b.set_capacity_mbps(float(val))
 
     def _on_host_rate_changed(self, val):
-        self.lbl_host_rate.setText(f"Main Sending Rate: {val}.0 Mbps")
+        self.lbl_val_host.setText(f"{val}.0 Mbps")
         if self.main_sender:
             self.main_sender.set_rate(float(val))
 
     def _on_cross_rate_changed(self, val):
-        self.lbl_cross_rate.setText(f"Cross-Traffic Burst: {val}.0 Mbps")
+        self.lbl_val_cross.setText(f"{val}.0 Mbps")
 
     def _toggle_rate_adapt(self):
         self.rate_adaptation_enabled = not self.rate_adaptation_enabled
         if self.rate_adaptation_enabled:
             self.btn_toggle_rate_adapt.setText("UDP Rate Adaptation: ON (Feedback Active)")
-            self.btn_toggle_rate_adapt.setStyleSheet("background-color: #a6e3a1; color: #11111b;")
+            self.btn_toggle_rate_adapt.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold;")
         else:
             self.btn_toggle_rate_adapt.setText("UDP Rate Adaptation: OFF")
             self.btn_toggle_rate_adapt.setStyleSheet("background-color: #313244; color: #cdd6f4;")
@@ -936,7 +1395,7 @@ class MasterSDNGUI(QMainWindow):
             self.main_sender.stop()
             self.main_sender = None
             self.btn_toggle_sender.setText("▶ Start Main UDP Stream")
-            self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b;")
+            self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 7px;")
         else:
             rate = float(self.slider_host_rate.value())
             self.main_sender = UDPSender(
@@ -949,7 +1408,7 @@ class MasterSDNGUI(QMainWindow):
             )
             self.main_sender.start()
             self.btn_toggle_sender.setText("⏹ Stop Main UDP Stream")
-            self.btn_toggle_sender.setStyleSheet("background-color: #eba0ac; color: #11111b;")
+            self.btn_toggle_sender.setStyleSheet("background-color: #eba0ac; color: #11111b; font-weight: bold; padding: 7px;")
 
     def _inject_congestion(self):
         burst_rate = float(self.slider_cross_rate.value())
@@ -968,17 +1427,17 @@ class MasterSDNGUI(QMainWindow):
         self.controller.adaptive_routing_enabled = not self.controller.adaptive_routing_enabled
         if self.controller.adaptive_routing_enabled:
             self.btn_toggle_sdn.setText("Auto-SDN Dynamic Rerouting: ON")
-            self.btn_toggle_sdn.setStyleSheet("background-color: #89b4fa; color: #11111b;")
+            self.btn_toggle_sdn.setStyleSheet("background-color: #89b4fa; color: #11111b; font-weight: bold;")
         else:
             self.btn_toggle_sdn.setText("Auto-SDN Dynamic Rerouting: OFF (STATIC)")
-            self.btn_toggle_sdn.setStyleSheet("background-color: #f38ba8; color: #11111b;")
+            self.btn_toggle_sdn.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold;")
 
     def _reset_topology(self):
         if self.main_sender:
             self.main_sender.stop()
             self.main_sender = None
             self.btn_toggle_sender.setText("▶ Start Main UDP Stream")
-            self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b;")
+            self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 7px;")
         self.controller.current_active_path = PATH_PRIMARY
         self.controller.total_reroutes = 0
         self.controller.consecutive_breaches = 0
@@ -1025,13 +1484,14 @@ class MasterSDNGUI(QMainWindow):
         lost = stats.get("total_lost", 0)
         total_pkts = recv + lost
 
-        self.lbl_val_thpt.setText(f"{thpt:.2f} Mbps (Goodput: {goodput:.2f}M)")
-        self.lbl_val_loss.setText(f"{win_loss:.1f}% (Overall: {all_loss:.1f}%)")
+        self.lbl_val_thpt.setText(f"{thpt:.2f} Mbps")
+        self.lbl_sub_goodput.setText(f"Goodput: {goodput:.2f} Mbps")
+        self.lbl_val_loss.setText(f"{win_loss:.1f} %")
+        self.lbl_sub_loss.setText(f"Overall: {all_loss:.1f} %")
         self.lbl_val_lat.setText(f"{lat:.1f} ms")
         self.lbl_val_jit.setText(f"{jit:.2f} ms")
-        self.lbl_val_counts.setText(f"Recv: {recv:,} | Lost: {lost:,} (Total: {total_pkts:,})")
+        self.lbl_val_counts.setText(f"Recv: {recv:,} | Lost: {lost:,} | Total: {total_pkts:,}")
 
-        # Active path status with dirty-checking
         active_path = ctrl_status["active_path"]
         both_congested = bool(ctrl_status.get("both_paths_congested"))
         status_key = f"{active_path}_{both_congested}"
@@ -1052,18 +1512,15 @@ class MasterSDNGUI(QMainWindow):
             self._last_recovery_time_sec = rec_sec
             self.lbl_recovery_time.setText(f"Failover Latency: {rec_sec * 1000:.2f} ms")
 
-        # Query live OpenFlow Flow Table Display with dirty checking
         flow_text = self.controller.get_flow_table("s1")
         if flow_text != self._last_flow_text:
             self.lbl_flow_table.setText(flow_text)
             self._last_flow_text = flow_text
 
-        # Update visual topology
         load_a = ctrl_status.get("path_a_load_mbps", 0.0)
         load_b = ctrl_status.get("path_b_load_mbps", 0.0)
         is_congested = (load_a >= self.controller.congestion_threshold_mbps)
 
-        # Compute virtual queue occupancy
         q_cur = self.emulator.link_path_a.packet_queue.qsize()
         q_max = self.emulator.link_path_a.max_queue
         q_pct = (q_cur / max(1, q_max)) * 100.0
@@ -1074,9 +1531,22 @@ class MasterSDNGUI(QMainWindow):
             q_pct, q_max, is_main_active, self.is_cross_burst_active
         )
 
-        # Update real-time plot
         elapsed = time.time() - self.start_epoch
-        self.plot_canvas.update_plot(elapsed, thpt, loss)
+        self.plot_container.update_plot(elapsed, thpt, loss)
+
+        self.sdn_analytics_widget.update_sdn_telemetry(
+            t=elapsed,
+            active_path=active_path,
+            load_a=load_a,
+            load_b=load_b,
+            threshold=self.controller.congestion_threshold_mbps,
+            capacity=LINK_CAPACITY_MBPS,
+            queue_pkts=q_cur,
+            loss_pct=loss,
+            latency_ms=lat,
+            jitter_ms=jit,
+            failover_latency_sec=rec_sec
+        )
 
     def closeEvent(self, event):
         self.timer.stop()
@@ -1090,6 +1560,9 @@ class MasterSDNGUI(QMainWindow):
 
 
 def main():
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     app = QApplication(sys.argv)
     window = MasterSDNGUI()
     window.show()

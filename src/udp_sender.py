@@ -241,9 +241,12 @@ class UDPSender:
                 self._sock.sendto(data_pkt, (self.target_ip, self.target_port))
                 self.packets_sent += 1
                 self.bytes_sent += len(data_pkt)
+            except (ConnectionResetError, ConnectionRefusedError):
+                continue
             except OSError as e:
-                # Network unreachable or socket closed
-                break
+                if not self._running:
+                    break
+                continue
 
             # Precise rate pacing interval (cached, updated only on rate changes)
             next_send_time += self._packet_interval

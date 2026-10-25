@@ -41,6 +41,7 @@ class UDPReceiver:
         self.feedback_target = feedback_target  # (ip, port) to send feedback datagrams
 
         self._sock: Optional[socket.socket] = None
+        self._fb_sock: Optional[socket.socket] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -81,6 +82,12 @@ class UDPReceiver:
         self._sock.bind((self.bind_ip, self.bind_port))
         self._sock.settimeout(0.5)
 
+        # Dedicated outbound feedback socket prevents WinError 10054 on self._sock
+        try:
+            self._fb_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        except OSError:
+            self._fb_sock = None
+
     def start(self):
         """Starts the receiver loop in a background thread."""
         self._setup_socket()
@@ -102,6 +109,13 @@ class UDPReceiver:
                 pass
             self._sock = None
 
+        if self._fb_sock:
+            try:
+                self._fb_sock.close()
+            except OSError:
+                pass
+            self._fb_sock = None
+
         if self.log_file:
             self.export_history_to_file(self.log_file)
 
@@ -116,8 +130,14 @@ class UDPReceiver:
             except socket.timeout:
                 self._check_window(time.time())
                 continue
+            except (ConnectionResetError, ConnectionRefusedError):
+                # On Windows, ICMP unreachable on other ports can bubble up; ignore and continue
+                self._check_window(time.time())
+                continue
             except OSError:
-                break
+                if not self._running:
+                    break
+                continue
 
             try:
                 seq_num, send_time, flow_id, flags, payload = unpack_packet(data)
@@ -194,12 +214,12 @@ class UDPReceiver:
             self.history.append(snapshot)
 
             # Send feedback datagram if feedback channel is active
-            if self.feedback_target and self._sock:
+            if self.feedback_target and self._fb_sock:
                 try:
                     suggested_rate = max(1.5, throughput_mbps * (0.75 if window_loss_pct > 3.0 else 1.05))
                     fb = pack_feedback(window_loss_pct, throughput_mbps, avg_lat, suggested_rate)
-                    self._sock.sendto(fb, self.feedback_target)
-                except OSError:
+                    self._fb_sock.sendto(fb, self.feedback_target)
+                except (ConnectionResetError, ConnectionRefusedError, OSError):
                     pass
 
             # Reset window

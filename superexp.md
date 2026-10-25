@@ -211,12 +211,12 @@ Our automated benchmark runs an end-to-end experiment demonstrating the before, 
 * Computes average throughput, packet loss, peak loss, latency, and recovery time.
 * Uses Matplotlib with the headless `"Agg"` backend to render the 4-panel comparison figure saved as `evaluation_results.png`.
 
-### File 13: [`src/tcp_congestion_sim.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/tcp_congestion_sim.py) (Transport Layer Congestion Models)
-* Implements mathematical algorithmic models for:
-  - **TCP Tahoe:** Slow start, congestion avoidance, drops to 1 MSS on loss.
-  - **TCP Reno:** Fast recovery (halves window to ssthresh on 3 dup ACKs).
-  - **TCP CUBIC:** RFC 8312 cubic window growth function: $W_{\text{cubic}}(t) = C(t - K)^3 + W_{\max}$.
-  - **SDN Dynamic Rerouting:** Demonstrates that by redirecting traffic before buffer overflow, the transport-layer window $cwnd$ never collapses!
+### File 13: [`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py) (SDN Dynamic Rerouting Analytics Dashboard)
+* Implements dedicated multi-metric real-time SDN graphs:
+  - **Dual-Path Offered Load vs SDN Threshold:** Tracks Path-A vs Path-B load against the 8.0 Mbps threshold and 10.0 Mbps bottleneck capacity.
+  - **Ingress Buffer Queue & Loss Mitigation:** Graphed queue fill (0-100 pkts) and packet loss drop to 0% upon dynamic rerouting.
+  - **Latency & Jitter Stability:** End-to-end one-way delay and RFC 3550 jitter across path failover transitions.
+  - **NavigationToolbar & Auto-Track:** Fully zoomable and pannable with smart auto-track lock that pauses on user inspection and snaps back on toggle.
 
 ### File 14: [`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py) (Master 60 FPS Presentation Dashboard)
 * **60 FPS Animated Topology Canvas:** Runs at 16 ms intervals with pre-cached `QFont`, `QPen`, and `QBrush` assets, rendering packet dot streams, queue fill meters, and translucent watermark `*D1`.

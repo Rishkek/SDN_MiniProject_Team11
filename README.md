@@ -14,7 +14,7 @@ This repository implements a complete, end-to-end Computer Networking mini-proje
   - Live interactive Network Topology with animated link states and real-time load indicators.
   - Interactive Parameter Sliders: Queue limit (up to 100 packets), bottleneck bandwidth (up to 10 Mbps), host sending rate, and cross-traffic burst rate.
   - Category 2 Socket Telemetry: Real-time digital readouts for throughput, loss rate %, latency, and RFC 3550 jitter.
-  - Congestion Mechanisms in Action: Live saw-tooth CWND comparison graphs of **TCP Tahoe**, **TCP Reno**, and **TCP CUBIC** vs **SDN Dynamic Rerouting**.
+  - SDN Dynamic Rerouting Analytics Dashboard: Real-time multi-metric plots of Dual-Path Offered Load (Path-A vs Path-B), SDN Congestion Threshold (8.0 Mbps), Switch S1 Queue Buffer Occupancy, Packet Loss Mitigation, and End-to-End Latency Transitions.
   - One-click actions: Start/Stop stream, Inject Congestion, and Reset / Stop Topology.
 - **Comparative Benchmark Suite:** Automated testing pipeline contrasting Static Routing against Dynamic Adaptive Routing, calculating Recovery Time, Throughput, and Packet Loss, and exporting publication-quality evaluation plots (`evaluation_results.png`).
 - **Turnkey Setup:** Includes automated `setup.py` that verifies/installs all dependencies and seamlessly transfers control to `run.py`.
@@ -173,11 +173,14 @@ The application has undergone rigorous performance profiling and low-overhead op
 ```
 ├── .gitignore               # Git ignore rules
 ├── README.md                # Project overview and reproduction instructions
-├── VIVA_GUIDE.md            # Detailed viva questions, theory, and answers
-├── superexp.md              # Master explanation of entire codebase & behind-the-scenes
-├── study1.md                # Member 1 Guide: UDP Socket Programming & Custom Protocol
-├── study2.md                # Member 2 Guide: Mininet Topology & Data Plane Virtualization
-├── study3.md                # Member 3 Guide: SDN Controller & Dynamic Rerouting
+├── study1.md                # Subsystem 1 Guide: Transport Layer & Low-Level UDP Sockets
+├── viva1.md                 # Subsystem 1 Viva Defense & Demonstration Walkthrough
+├── study2.md                # Subsystem 2 Guide: Network Infrastructure & Mininet Data Plane
+├── viva2.md                 # Subsystem 2 Viva Defense & Demonstration Walkthrough
+├── study3.md                # Subsystem 3 Guide: SDN Control Plane & Dynamic Rerouting
+├── viva3.md                 # Subsystem 3 Viva Defense & Demonstration Walkthrough
+├── superexp.md              # Master deep-dive explanation of entire codebase
+├── VIVA_GUIDE.md            # Comprehensive viva questions, theory, and answers
 ├── requirements.txt         # Python dependencies
 ├── setup.py                 # Automated prerequisite checker & launcher
 ├── run.py                   # Master interactive orchestrator & CLI

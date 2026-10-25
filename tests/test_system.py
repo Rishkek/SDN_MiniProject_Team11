@@ -13,7 +13,7 @@ Implements all 12 Acceptance Test Scenarios specified in Section 11:
 - Test H: Backup Path Overload / Fallback
 - Test I: Telemetry Mathematical Correctness
 - Test J: Static vs Adaptive Benchmark Evaluation
-- Test K: TCP Tahoe / Reno / CUBIC Algorithms
+- Test K: SDN Dynamic Rerouting Metrics & Failover Verification
 - Test L: Clean Shutdown, Reset & Resource Leaks
 """
 
@@ -31,8 +31,7 @@ from src.udp_receiver import UDPReceiver
 from src.congestion_generator import CongestionGenerator
 from src.sdn_controller import SDNController
 from src.network_emulator import NetworkEmulator
-from src.config import PATH_PRIMARY, PATH_ALTERNATE, MAIN_UDP_PORT, CROSS_UDP_PORT
-from src.tcp_congestion_sim import TCPCongestionSimulator
+from src.config import PATH_PRIMARY, PATH_ALTERNATE, MAIN_UDP_PORT, CROSS_UDP_PORT, CONGESTION_THRESHOLD_MBPS
 
 
 # ---------------------------------------------------------------------------
@@ -305,28 +304,38 @@ def test_j_static_vs_adaptive_benchmark():
 
 
 # ---------------------------------------------------------------------------
-# Test K: TCP Tahoe, Reno, CUBIC Algorithmic Verification
+# Test K: SDN Dynamic Rerouting Metrics & Failover Verification
 # ---------------------------------------------------------------------------
-def test_k_tcp_comparison_algorithms():
-    """Verify correctness of transport-layer educational simulation models."""
-    sim = TCPCongestionSimulator(bottleneck_bw_mbps=10.0, queue_limit_packets=30, total_time_sec=10.0)
+def test_k_sdn_flow_rerouting_metrics():
+    """Verify SDN dynamic rerouting trigger, flow table update, and failover latency."""
+    controller = SDNController(congestion_threshold_mbps=8.0, poll_interval=0.1, adaptive_routing_enabled=True)
+    controller.start()
 
-    tahoe = sim.simulate_tahoe(loss_event_time=4.0)
-    reno = sim.simulate_reno(loss_event_time=4.0)
-    cubic = sim.simulate_cubic(loss_event_time=4.0)
-    sdn = sim.simulate_sdn_rerouted_flow(reroute_time=4.2)
+    # Initial state must be Primary Path
+    assert controller.current_active_path == PATH_PRIMARY
+    assert controller.total_reroutes == 0
 
-    # 1. Tahoe must reset to 1.0 MSS upon congestion
-    assert 1.0 in tahoe["cwnds"], "Tahoe drops to 1 MSS on loss"
+    # Inject breach 1
+    controller.record_external_stats("s1", port_no=2, rx_bytes=0, tx_bytes=0)
+    time.sleep(0.12)
+    controller.record_external_stats("s1", port_no=2, rx_bytes=200000, tx_bytes=200000)
+    time.sleep(0.15)
 
-    # 2. Reno cuts to half (ssthresh), does NOT drop to 1 on fast recovery
-    assert min(reno["cwnds"][20:]) >= 2.0, "Reno fast recovery stays above 1 MSS"
+    # Inject breach 2 (trigger threshold)
+    controller.record_external_stats("s1", port_no=2, rx_bytes=400000, tx_bytes=400000)
+    time.sleep(0.2)
 
-    # 3. CUBIC must maintain higher window post-recovery than Tahoe
-    assert cubic["cwnds"][-1] > tahoe["cwnds"][-1], "CUBIC recovers faster than Tahoe"
+    status = controller.get_controller_status()
+    assert status["active_path"] == PATH_ALTERNATE, "SDN Controller must reroute to Path B upon congestion"
+    assert status["total_reroutes"] >= 1, "Reroute counter must increment"
+    assert status["latest_recovery_time_sec"] is not None, "Recovery latency must be recorded"
+    assert status["latest_recovery_time_sec"] > 0.0, "Recovery latency must be positive"
 
-    # 4. SDN dynamic reroute prevents window collapse
-    assert sdn["final_cwnd"] >= reno["final_cwnd"], "SDN flow maintains high window"
+    # Verify OpenFlow table has been updated to Output port 3 (Path B)
+    flow_table = controller.get_flow_table("s1")
+    assert "action=OUTPUT Port 3" in flow_table, "OpenFlow 1.3 flow table must point to port 3"
+
+    controller.stop()
 
 
 # ---------------------------------------------------------------------------
