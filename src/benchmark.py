@@ -53,9 +53,14 @@ def run_single_experiment(
     mode_name: str,
     adaptive_enabled: bool,
     enable_rate_adapt: bool = False,
-    total_duration: float = 22.0,
-    congestion_start: float = 6.0,
-    congestion_duration: float = 10.0
+    total_duration: float = 14.0,
+    congestion_start: float = 3.0,
+    congestion_duration: float = 7.0,
+    ingress_port: int = 9000,
+    main_port: int = MAIN_UDP_PORT,
+    cross_port: int = CROSS_UDP_PORT,
+    feedback_port: int = 9005,
+    progress_callback = None
 ) -> Dict[str, Any]:
     """
     Executes an end-to-end experiment run with real UDP sockets and virtual switches.
@@ -64,6 +69,7 @@ def run_single_experiment(
     print(f"[*] STARTING TEST RUN: {mode_name}")
     print(f"[*] Adaptive SDN Rerouting: {'ENABLED' if adaptive_enabled else 'DISABLED (STATIC)'}")
     print(f"[*] UDP Rate Adaptation   : {'ENABLED' if enable_rate_adapt else 'DISABLED'}")
+    print(f"[*] Ports: Ingress={ingress_port} | MainDest={main_port} | CrossDest={cross_port}")
     print(f"=======================================================")
 
     # 1. Start SDN Controller
@@ -73,39 +79,44 @@ def run_single_experiment(
     )
     controller.start()
 
-    # 2. Start Network Emulator (Ingress proxy port 9000)
-    emulator = NetworkEmulator(controller=controller, ingress_port=9000)
+    # 2. Start Network Emulator
+    emulator = NetworkEmulator(
+        controller=controller,
+        ingress_port=ingress_port,
+        main_dest_port=main_port,
+        cross_dest_port=cross_port
+    )
     emulator.start()
 
-    # 3. Start UDP Receiver on H2 (Port 9999) with feedback if enabled
-    fb_target = ("127.0.0.1", 9005) if enable_rate_adapt else None
-    receiver = UDPReceiver(bind_ip="127.0.0.1", bind_port=MAIN_UDP_PORT, feedback_target=fb_target)
+    # 3. Start UDP Receiver on H2 with feedback if enabled
+    fb_target = ("127.0.0.1", feedback_port) if enable_rate_adapt else None
+    receiver = UDPReceiver(bind_ip="127.0.0.1", bind_port=main_port, feedback_target=fb_target)
     receiver.start()
 
-    # 4. Start Receiver for Cross Traffic on H4 (Port 9998)
-    cross_receiver = UDPReceiver(bind_ip="127.0.0.1", bind_port=CROSS_UDP_PORT)
+    # 4. Start Receiver for Cross Traffic on H4
+    cross_receiver = UDPReceiver(bind_ip="127.0.0.1", bind_port=cross_port)
     cross_receiver.start()
 
     time.sleep(0.3)
 
-    # 5. Start Main UDP Sender (H1 -> Emulator port 9000)
+    # 5. Start Main UDP Sender (H1 -> Emulator ingress port)
     main_sender = UDPSender(
         target_ip="127.0.0.1",
-        target_port=9000,
+        target_port=ingress_port,
         rate_mbps=MAIN_TRAFFIC_RATE_MBPS,
         duration=total_duration,
         flow_id=FLOW_MAIN,
         enable_rate_adaptation=enable_rate_adapt,
-        feedback_port=9005 if enable_rate_adapt else None
+        feedback_port=feedback_port if enable_rate_adapt else None
     )
     main_sender.start()
-    print(f"[+] Main flow started: {MAIN_TRAFFIC_RATE_MBPS} Mbps UDP stream.")
+    print(f"[+] Main flow started: {MAIN_TRAFFIC_RATE_MBPS} Mbps UDP stream on port {ingress_port}.")
 
     # 6. Schedule Cross-Traffic Congestion Generator
     def run_cross():
         gen = CongestionGenerator(
             target_ip="127.0.0.1",
-            target_port=9000,
+            target_port=ingress_port,
             rate_mbps=CROSS_TRAFFIC_RATE_MBPS,
             start_delay=congestion_start,
             duration=congestion_duration
@@ -118,13 +129,18 @@ def run_single_experiment(
     # 7. Monitor experiment timeline
     start_t = time.time()
     peak_q = 0
-    while time.time() - start_t < total_duration + 1.5:
+    while time.time() - start_t < total_duration + 1.2:
         time.sleep(0.5)
         cur_elapsed = time.time() - start_t
         stats = receiver.get_latest_stats()
         ctrl_status = controller.get_controller_status()
         q_now = emulator.link_path_a.packet_queue.qsize()
         peak_q = max(peak_q, q_now)
+        if progress_callback:
+            try:
+                progress_callback(mode_name, cur_elapsed, total_duration)
+            except Exception:
+                pass
         print(
             f"[{mode_name:<8}] T={cur_elapsed:>4.1f}s | "
             f"Thpt: {stats['throughput_mbps']:>5.2f}M | "
@@ -142,6 +158,7 @@ def run_single_experiment(
     receiver.stop()
     emulator.stop()
     controller.stop()
+    time.sleep(0.3)
 
     time_series = list(receiver.history)
     recovery_time = controller.recovery_time_sec or 0.0
@@ -182,17 +199,60 @@ def run_single_experiment(
     }
 
 
-def plot_benchmark_results(static_res: Dict[str, Any], dynamic_res: Dict[str, Any], rate_res: Optional[Dict[str, Any]] = None, output_path: str = "evaluation_results.png"):
-    """Generates a comprehensive 4-panel comparative evaluation chart."""
+def plot_benchmark_results(
+    static_res: Dict[str, Any],
+    dynamic_res: Dict[str, Any],
+    rate_res: Optional[Dict[str, Any]] = None,
+    output_path: Optional[str] = "evaluation_results.png",
+    fig: Optional[Any] = None,
+    dark_mode: bool = True
+) -> Any:
+    """Generates a comprehensive 4-panel comparative evaluation chart with dark/light theme support."""
     if not MATPLOTLIB_AVAILABLE:
         print("[!] Matplotlib not available; skipping plot generation.")
-        return
+        return None
 
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    fig.suptitle("SDN Congestion Detection and Traffic Rerouting - Evaluation", fontsize=16, fontweight="bold")
+    if fig is None:
+        fig = plt.figure(figsize=(14, 8.5), dpi=110)
+    else:
+        fig.clear()
 
-    stat_ts = static_res["time_series"]
-    dyn_ts = dynamic_res["time_series"]
+    # Theme colors
+    if dark_mode:
+        bg_fig = "#181825"
+        bg_ax = "#1e1e2e"
+        col_text = "#cdd6f4"
+        col_title = "#89b4fa"
+        col_grid = "#313244"
+        col_spine = "#45475a"
+        col_static = "#f38ba8"  # Catppuccin red/pink
+        col_dynamic = "#a6e3a1" # Catppuccin green
+        col_rate = "#89b4fa"    # Catppuccin blue
+        col_burst = "#fab387"   # Catppuccin peach
+        col_nom = "#f9e2af"     # Catppuccin yellow
+        legend_bg = "#181825"
+    else:
+        bg_fig = "#ffffff"
+        bg_ax = "#f8f9fa"
+        col_text = "#212529"
+        col_title = "#0d6efd"
+        col_grid = "#dee2e6"
+        col_spine = "#ced4da"
+        col_static = "#dc3545"
+        col_dynamic = "#198754"
+        col_rate = "#0d6efd"
+        col_burst = "#fd7e14"
+        col_nom = "#6c757d"
+        legend_bg = "#ffffff"
+
+    fig.patch.set_facecolor(bg_fig)
+
+    axes = fig.subplots(2, 2)
+    fig.suptitle("SDN Congestion Detection and Traffic Rerouting - Empirical Performance Evaluation",
+                 fontsize=13, fontweight="bold", color=col_title, y=0.98)
+
+    stat_ts = static_res.get("time_series", [])
+    dyn_ts = dynamic_res.get("time_series", [])
 
     stat_times = [p["timestamp"] for p in stat_ts]
     stat_thpt = [p["throughput_mbps"] for p in stat_ts]
@@ -204,85 +264,103 @@ def plot_benchmark_results(static_res: Dict[str, Any], dynamic_res: Dict[str, An
     dyn_loss = [p["loss_pct"] for p in dyn_ts]
     dyn_lat = [p["avg_latency_ms"] for p in dyn_ts]
 
+    # Detect congestion span from parameters or sensible defaults (3.0 to 10.0s)
+    c_start = 3.0 if (dyn_times and dyn_times[-1] <= 18.0) else 6.0
+    c_end = 10.0 if (dyn_times and dyn_times[-1] <= 18.0) else 16.0
+
+    for ax in axes.flat:
+        ax.set_facecolor(bg_ax)
+        ax.grid(True, linestyle="--", alpha=0.45, color=col_grid)
+        ax.tick_params(colors=col_text, labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_color(col_spine)
+
     # Plot 1: Throughput over Time
     ax1 = axes[0, 0]
-    ax1.plot(stat_times, stat_thpt, label="Experiment A: Static Routing (Congested)", color="#d9534f", linestyle="--", linewidth=2.0)
-    ax1.plot(dyn_times, dyn_thpt, label="Experiment B: Dynamic SDN Rerouting", color="#28a745", linewidth=2.5)
+    ax1.plot(stat_times, stat_thpt, label="Static Routing (Exp A - Congested)", color=col_static, linestyle="--", linewidth=2.0)
+    ax1.plot(dyn_times, dyn_thpt, label="Dynamic SDN (Exp B - Restored)", color=col_dynamic, linewidth=2.5)
     if rate_res:
-        r_ts = rate_res["time_series"]
-        ax1.plot([p["timestamp"] for p in r_ts], [p["throughput_mbps"] for p in r_ts], label="Experiment C: SDN + Rate Adaptation", color="#007bff", linestyle="-.", linewidth=2.0)
-    ax1.axvspan(6.0, 16.0, color="#ffeeba", alpha=0.5, label="Congestion Burst (6-16s)")
-    ax1.axhline(6.0, color="#6c757d", linestyle=":", label="Nominal Rate (6 Mbps)")
-    ax1.set_title("UDP Throughput over Time (Mbps)", fontweight="bold")
-    ax1.set_xlabel("Time (seconds)")
-    ax1.set_ylabel("Throughput (Mbps)")
+        r_ts = rate_res.get("time_series", [])
+        ax1.plot([p["timestamp"] for p in r_ts], [p["throughput_mbps"] for p in r_ts], label="SDN + Rate Control (Exp C)", color=col_rate, linestyle="-.", linewidth=2.0)
+    ax1.axvspan(c_start, c_end, color=col_burst, alpha=0.18, label=f"Congestion Burst ({c_start:.0f}-{c_end:.0f}s)")
+    ax1.axhline(6.0, color=col_nom, linestyle=":", linewidth=1.5, label="Nominal Rate (6M)")
+    ax1.set_title("UDP Throughput over Time (Mbps)", fontweight="bold", fontsize=9, color=col_text, pad=4)
+    ax1.set_xlabel("Elapsed Time (s)", fontsize=8, color=col_text)
+    ax1.set_ylabel("Throughput (Mbps)", fontsize=8, color=col_text)
     ax1.set_ylim(0, 8.5)
-    ax1.grid(True, linestyle="--", alpha=0.6)
-    ax1.legend(loc="lower right", fontsize=8)
+    ax1.legend(loc="lower right", fontsize=7.5, facecolor=legend_bg, edgecolor=col_spine, labelcolor=col_text)
 
     # Plot 2: Packet Loss Rate (%) over Time
     ax2 = axes[0, 1]
-    ax2.plot(stat_times, stat_loss, label="Experiment A: Static Routing (High Drop)", color="#d9534f", linestyle="--", linewidth=2.0)
-    ax2.plot(dyn_times, dyn_loss, label="Experiment B: Dynamic SDN (Sub-second recovery)", color="#28a745", linewidth=2.5)
+    ax2.plot(stat_times, stat_loss, label="Static Routing (Sustained Drop)", color=col_static, linestyle="--", linewidth=2.0)
+    ax2.plot(dyn_times, dyn_loss, label="Dynamic SDN (Sub-second Recovery)", color=col_dynamic, linewidth=2.5)
     if rate_res:
-        r_ts = rate_res["time_series"]
-        ax2.plot([p["timestamp"] for p in r_ts], [p["loss_pct"] for p in r_ts], label="Experiment C: SDN + Rate Adaptation", color="#007bff", linestyle="-.", linewidth=2.0)
-    ax2.axvspan(6.0, 16.0, color="#ffeeba", alpha=0.5)
-    ax2.set_title("Packet Loss Rate (%) over Time", fontweight="bold")
-    ax2.set_xlabel("Time (seconds)")
-    ax2.set_ylabel("Loss Rate (%)")
+        r_ts = rate_res.get("time_series", [])
+        ax2.plot([p["timestamp"] for p in r_ts], [p["loss_pct"] for p in r_ts], label="SDN + Rate Control", color=col_rate, linestyle="-.", linewidth=2.0)
+    ax2.axvspan(c_start, c_end, color=col_burst, alpha=0.18)
+    ax2.set_title("Packet Loss Rate (%) over Time", fontweight="bold", fontsize=9, color=col_text, pad=4)
+    ax2.set_xlabel("Elapsed Time (s)", fontsize=8, color=col_text)
+    ax2.set_ylabel("Loss Rate (%)", fontsize=8, color=col_text)
     ax2.set_ylim(-2, 70)
-    ax2.grid(True, linestyle="--", alpha=0.6)
-    ax2.legend(loc="upper right", fontsize=8)
+    ax2.legend(loc="upper right", fontsize=7.5, facecolor=legend_bg, edgecolor=col_spine, labelcolor=col_text)
 
-    # Plot 3: End-to-End Latency
+    # Plot 3: End-to-End One-Way Latency
     ax3 = axes[1, 0]
-    ax3.plot(stat_times, stat_lat, label="Experiment A: Static Latency (Bufferbloat)", color="#d9534f", linestyle="--", linewidth=2.0)
-    ax3.plot(dyn_times, dyn_lat, label="Experiment B: Dynamic Latency (Path B: 15ms)", color="#28a745", linewidth=2.5)
+    ax3.plot(stat_times, stat_lat, label="Static Latency (Bufferbloat Spikes)", color=col_static, linestyle="--", linewidth=2.0)
+    ax3.plot(dyn_times, dyn_lat, label="Dynamic Latency (Path B: 15ms)", color=col_dynamic, linewidth=2.5)
     if rate_res:
-        r_ts = rate_res["time_series"]
-        ax3.plot([p["timestamp"] for p in r_ts], [p["avg_latency_ms"] for p in r_ts], label="Experiment C: Rate Control Latency", color="#007bff", linestyle="-.", linewidth=2.0)
-    ax3.axvspan(6.0, 16.0, color="#ffeeba", alpha=0.5)
-    ax3.set_title("One-Way Latency (ms)", fontweight="bold")
-    ax3.set_xlabel("Time (seconds)")
-    ax3.set_ylabel("Latency (ms)")
-    ax3.grid(True, linestyle="--", alpha=0.6)
-    ax3.legend(loc="upper left", fontsize=8)
+        r_ts = rate_res.get("time_series", [])
+        ax3.plot([p["timestamp"] for p in r_ts], [p["avg_latency_ms"] for p in r_ts], label="SDN + Rate Control Latency", color=col_rate, linestyle="-.", linewidth=2.0)
+    ax3.axvspan(c_start, c_end, color=col_burst, alpha=0.18)
+    ax3.set_title("End-to-End One-Way Latency (ms)", fontweight="bold", fontsize=9, color=col_text, pad=4)
+    ax3.set_xlabel("Elapsed Time (s)", fontsize=8, color=col_text)
+    ax3.set_ylabel("Latency (ms)", fontsize=8, color=col_text)
+    ax3.legend(loc="upper left", fontsize=7.5, facecolor=legend_bg, edgecolor=col_spine, labelcolor=col_text)
 
     # Plot 4: Summary Comparison Bar Chart
     ax4 = axes[1, 1]
-    metrics = ["Avg Throughput (M)", "Avg Loss (%)", "Peak Loss (%)"]
+    metrics = ["Avg Thpt (M)", "Avg Loss (%)", "Peak Loss (%)"]
     static_vals = [static_res["avg_throughput_mbps"], static_res["avg_loss_pct"], static_res["peak_loss_pct"]]
     dyn_vals = [dynamic_res["avg_throughput_mbps"], dynamic_res["avg_loss_pct"], dynamic_res["peak_loss_pct"]]
 
     x = [0, 1, 2]
-    width = 0.28
-    ax4.bar([i - width/2 for i in x], static_vals, width, label="Static Routing", color="#d9534f")
-    ax4.bar([i + width/2 for i in x], dyn_vals, width, label="Dynamic SDN", color="#28a745")
+    width = 0.26
+    b1 = ax4.bar([i - width for i in x], static_vals, width, label="Static Routing", color=col_static)
+    b2 = ax4.bar([i for i in x], dyn_vals, width, label="Dynamic SDN", color=col_dynamic)
     if rate_res:
         rate_vals = [rate_res["avg_throughput_mbps"], rate_res["avg_loss_pct"], rate_res["peak_loss_pct"]]
-        ax4.bar([i + width*1.5 for i in x], rate_vals, width, label="SDN + Rate Adapt", color="#007bff")
-    ax4.set_title("Performance Comparison Summary", fontweight="bold")
+        b3 = ax4.bar([i + width for i in x], rate_vals, width, label="SDN + Rate Adapt", color=col_rate)
+
+    ax4.set_title("Performance Comparison Summary", fontweight="bold", fontsize=9, color=col_text, pad=4)
     ax4.set_xticks(x)
-    ax4.set_xticklabels(metrics)
-    ax4.grid(True, linestyle="--", alpha=0.4, axis="y")
-    ax4.legend(fontsize=8)
+    ax4.set_xticklabels(metrics, fontsize=8, color=col_text)
+    ax4.legend(fontsize=7.5, facecolor=legend_bg, edgecolor=col_spine, labelcolor=col_text)
 
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=200)
-    print(f"\n[+] High-resolution evaluation graph saved to: {os.path.abspath(output_path)}")
+    fig.subplots_adjust(top=0.91, bottom=0.10, left=0.08, right=0.96, hspace=0.35, wspace=0.20)
+
+    if output_path:
+        try:
+            fig.savefig(output_path, dpi=180, facecolor=fig.get_facecolor(), bbox_inches="tight")
+            print(f"[+] Evaluation graph saved to: {os.path.abspath(output_path)}")
+        except Exception as e:
+            print(f"[!] Could not save plot image ({e})")
+
+    return fig
 
 
-def run_benchmark():
+def run_benchmark(total_duration: float = 14.0, congestion_start: float = 3.0, congestion_duration: float = 7.0):
     """Runs Experiments A, B, and C, compiles metrics, prints summary table, and generates plot."""
     print("\n=======================================================")
     print("        RUNNING COMPREHENSIVE 3-PHASE BENCHMARK")
     print("=======================================================")
-    static_results = run_single_experiment("STATIC", adaptive_enabled=False, enable_rate_adapt=False)
-    time.sleep(1.5)
-    dynamic_results = run_single_experiment("DYNAMIC", adaptive_enabled=True, enable_rate_adapt=False)
-    time.sleep(1.5)
-    rate_results = run_single_experiment("SDN+RATE", adaptive_enabled=True, enable_rate_adapt=True)
+    static_results = run_single_experiment("STATIC", adaptive_enabled=False, enable_rate_adapt=False,
+                                           total_duration=total_duration, congestion_start=congestion_start, congestion_duration=congestion_duration)
+    time.sleep(1.0)
+    dynamic_results = run_single_experiment("DYNAMIC", adaptive_enabled=True, enable_rate_adapt=False,
+                                            total_duration=total_duration, congestion_start=congestion_start, congestion_duration=congestion_duration)
+    time.sleep(1.0)
+    rate_results = run_single_experiment("SDN+RATE", adaptive_enabled=True, enable_rate_adapt=True,
+                                         total_duration=total_duration, congestion_start=congestion_start, congestion_duration=congestion_duration)
 
     summary_data = [
         ["Routing Approach", "Static (Exp A)", "Dynamic SDN (Exp B)", "SDN + Rate Control (Exp C)"],
@@ -312,7 +390,7 @@ def run_benchmark():
             print(f"{row[0]:<28} | {row[1]:<20} | {row[2]:<22} | {row[3]}")
     print("=" * 80)
 
-    plot_benchmark_results(static_results, dynamic_results, rate_results)
+    plot_benchmark_results(static_results, dynamic_results, rate_results, output_path="evaluation_results.png", dark_mode=True)
 
     # Save summary json
     with open("benchmark_summary.json", "w") as f:

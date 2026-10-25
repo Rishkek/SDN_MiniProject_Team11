@@ -144,9 +144,17 @@ class NetworkEmulator:
     Ingress proxy listens on local ports and forwards through simulated links.
     """
 
-    def __init__(self, controller: SDNController, ingress_port: int = 9000):
+    def __init__(
+        self,
+        controller: SDNController,
+        ingress_port: int = 9000,
+        main_dest_port: int = MAIN_UDP_PORT,
+        cross_dest_port: int = CROSS_UDP_PORT
+    ):
         self.controller = controller
         self.ingress_port = ingress_port
+        self.main_dest_port = main_dest_port
+        self.cross_dest_port = cross_dest_port
         self._running = False
         self._sock = None
         self._out_sock = None
@@ -283,7 +291,7 @@ class NetworkEmulator:
             active_link = None
             dest = None
             if flow_id == FLOW_MAIN:
-                dest = ("127.0.0.1", MAIN_UDP_PORT)
+                dest = ("127.0.0.1", self.main_dest_port)
                 # Query controller for current active path
                 if self.controller.current_active_path == PATH_PRIMARY:
                     active_link = self.link_path_a
@@ -291,7 +299,7 @@ class NetworkEmulator:
                     active_link = self.link_path_b
 
             elif flow_id == FLOW_CROSS:
-                dest = ("127.0.0.1", CROSS_UDP_PORT)
+                dest = ("127.0.0.1", self.cross_dest_port)
                 # Cross-traffic always flows through Path A to create congestion
                 active_link = self.link_path_a
 
