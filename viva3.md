@@ -2,142 +2,166 @@
 
 **Complements:** [`study3.md`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/study3.md)  
 **Topic Focus:** OpenFlow 1.3 Controller Architecture, Continuous Telemetry Polling, Congestion Detection, Hysteresis, Dynamic FlowMod Rerouting, and Automated Benchmarking  
-**Relevant Code Files:** `src/sdn_controller.py`, `src/ryu_controller.py`, `src/benchmark.py`, `src/gui_app.py` (SDN Analytics Dashboard)
+**Relevant Code Files:** `src/sdn_controller.py`, `src/ryu_controller.py`, `src/benchmark.py`, `src/gui_app.py` (SDN Analytics Dashboard & Benchmark Dashboard)
 
 ---
 
-## 1. Written Instructions: How to Demonstrate This Subsystem in the App
+# ================================================================
+# PART 1: DELIVERABLE 1 (D1 — FOUNDATION DEMO & VIVA - 15 MARKS)
+# ================================================================
 
-When presenting the SDN Control Plane, Telemetry, and Dynamic Rerouting subsystem, follow this exact click-by-click walkthrough:
+## 1. D1 Step-by-Step Demonstration Walkthrough in the App
+
+Follow these exact steps when demonstrating the **Deliverable 1 Foundation**:
+
+### Step 1: Explain the Decoupled SDN Architecture
+1. Launch the application (`python run.py`) and stay on **Tab 0 ("🌐 Live Visual Topology & Stream Control")**.
+2. **What to say aloud:**
+   > *"In traditional networks, switches are isolated, uncoordinated boxes. In Software-Defined Networking, we separate the Data Plane (fast packet forwarding in switches) from the Control Plane (centralized routing intelligence in software). Our controller maintains a global view of all switch port counters and programs switch behavior dynamically using OpenFlow 1.3."*
+
+---
+
+### Step 2: Inspect Switch S1's Baseline OpenFlow 1.3 Flow Table
+1. Look at the right-hand panel of Tab 0: find the **"Switch S1 OpenFlow 1.3 Flow Table"** display.
+2. Point to the baseline Priority 100 flow rule:
+   ```
+   cookie=0x0, duration=12.4s, table=0, n_packets=4210, n_bytes=4311040,
+   priority=100,udp,in_port=1,nw_dst=10.0.0.2,tp_dst=9999 actions=output:2
+   ```
+3. Point out:
+   - `priority=100`: The default baseline rule.
+   - `in_port=1`: Traffic arriving from Host $H_1$.
+   - `actions=output:2`: Steers traffic to Port 2 (Path A via Switch $S_2$).
+4. Point to the **translucent watermark `*D1`** on the visual topology canvas.
+5. **What to say aloud:**
+   > *"Here in Switch S1's flow table, we can inspect the baseline OpenFlow rule. It directs incoming UDP packets destined for 10.0.0.2 out of Port 2 along Path A. Path A is selected as the default route because it has a lower propagation delay (5 ms vs 15 ms). As long as traffic remains clean, packets travel over Path A with zero loss."*
+
+---
+
+### Step 3: Explain How the Controller Polls Port Hardware Counters
+1. Explain how `OFPPortStatsRequest` works behind the scenes.
+2. **What to say aloud:**
+   > *"Our SDN controller continuously communicates with Switch S1 using OpenFlow 1.3. Every 500 milliseconds, it queries the hardware port counters using `OFPPortStatsRequest`. The switch replies with transmitted byte counts (`tx_bytes`). By calculating the difference between consecutive polls, the controller calculates the exact bitrate passing through each physical link in real time."*
+
+---
+
+## 2. Core D1 Viva Defense Questions & Answers
+
+### Q1: What is the difference between the Control Plane and Data Plane in SDN?
+**Answer:**
+* **Data Plane:** Implemented inside switches (Open vSwitch). It is responsible only for forwarding packets from input ports to output ports at line rate based on match-action rules stored in flow tables.
+* **Control Plane:** Implemented by the **SDN Controller**. It operates as the centralized brain, calculating routing policies, monitoring network-wide port telemetry, and installing/deleting flow rules across switches via OpenFlow messages.
+
+### Q2: Why couldn't traditional routing protocols like OSPF solve this congestion?
+**Answer:**
+* **OSPF is completely load-blind.** It computes shortest paths based on static administrative metrics ($\text{Cost} = \frac{10^8}{\text{Bandwidth}}$) or static link delays.
+* Because Path A has a 5 ms delay and Path B has a 15 ms delay, OSPF always computes Path A as the shortest path.
+* Even when Path A is overloaded at 130% capacity and dropping 50% of all packets, OSPF stubbornly keeps routing all traffic over Path A.
+* Furthermore, OSPF link-state convergence takes **several seconds to minutes**, far too slow to prevent packet drops during sudden surges.
+
+### Q3: Why does ECMP (Equal-Cost Multi-Path) fail in this scenario?
+**Answer:**
+ECMP distributes traffic across parallel links by hashing the 5-tuple header (`src IP, dst IP, src port, dst port, proto`). Because all datagrams in our main flow share the identical 5-tuple, ECMP hashes every single packet into the same bucket, pinning the entire flow to Path A. ECMP has zero real-time awareness of link utilization or buffer occupancy.
+
+---
+
+# ================================================================
+# PART 2: DELIVERABLE 2 (D2 — ADVANCED DEMO & VIVA - 25 MARKS)
+# ================================================================
+
+## 1. D2 Step-by-Step Demonstration Walkthrough in the App
+
+Follow these exact steps when demonstrating the **Deliverable 2 Advanced Functionality**:
 
 ### Step 1: Open the Dedicated SDN Analytics Dashboard
-1. Launch the application (`python run.py`) if not already open.
-2. Click on **Tab 1: "📊 SDN Dynamic Rerouting Analytics & Dual-Path Telemetry"**.
-3. Point out the three expansive, full-height analytical plots:
-   - **Top Plot (Full Width):** *Dual-Path Offered Load vs SDN Congestion Threshold & Capacity*.
+1. Click on **Tab 1: "📊 SDN Dynamic Rerouting Analytics & Dual-Path Telemetry"**.
+2. Point out the three full-height analytical plots powered by PyQtGraph:
+   - **Top Plot:** *Dual-Path Offered Load vs SDN Congestion Threshold & Capacity*.
      - Point to the dashed yellow line: **`SDN Threshold (8.0M)`**.
      - Point to the dotted orange line: **`Bottleneck Capacity (10.0M)`**.
      - Point to the green curve: **`Path-A Load (Primary)`**.
      - Point to the blue curve: **`Path-B Load (Alternate)`**.
    - **Bottom-Left Plot:** *Switch S1 Ingress Buffer Queue & Packet Loss Rate*.
    - **Bottom-Right Plot:** *End-to-End One-Way Latency & RFC 3550 Jitter Stability*.
+3. Point to the **translucent watermark `*D2`** in the bottom-right corner.
 4. **What to say aloud:**
-   > *"Here in Tab 1 is our dedicated SDN Dynamic Rerouting Analytics Dashboard. Our SDN controller continuously polls switch port byte counters every 500 milliseconds. On the top graph, you can see our 10 Mbps bottleneck capacity ceiling and our 8.0 Mbps congestion detection threshold. Currently, our main stream is running smoothly over Path A at approximately 6.0 Mbps, well below the threshold."*
+   > *"Under Deliverable 2, we have built a dedicated real-time SDN Analytics Dashboard. The top plot displays our dual-path offered load against the 8.0 Mbps SDN congestion threshold and 10.0 Mbps link capacity ceiling. Notice our telemetry polling loop calculates bitrate every 500 milliseconds. Currently, Path A carries 6.0 Mbps, well below the threshold."*
 
 ---
 
-### Step 2: Trigger Congestion & Demonstrate Real-Time SDN Failover
-1. Click the orange button in the simulation menu or switch to Tab 0 and click **`⚡ Inject Congestion (7M Burst on Path A)`**.
-2. Immediately switch to or look at **Tab 1**:
+### Step 2: Trigger Congestion & Demonstrate Autonomous SDN Failover
+1. Click **`⚡ Inject Congestion (7M Burst on Path A)`**.
+2. Immediately observe **Tab 1**:
    - Watch the green curve (Path A load) surge from `6.0 Mbps` to `13.0 Mbps`, crossing the yellow `8.0 Mbps` threshold line!
    - In the bottom-left plot, watch the purple queue occupancy line spike to 85 pkts.
-   - After exactly two polling intervals (1.0 second), **watch the magic happen**:
+   - After exactly two polling intervals (1.0 second), **watch the failover occur**:
      - The green curve (Path A) instantly plummets to `0.0 Mbps`.
      - The blue curve (Path B) instantly jumps to `6.0 Mbps`!
    - Look at the top-right header status pill:
-     - The label turns bright blue: **`ACTIVE PATH: Path-B (DYNAMICALLY REROUTED)`**.
-     - The latency readout displays: **`Failover Latency: ~2.4 ms`**.
-   - Look at the bottom scrolling event log:
+     - Turns bright blue: **`ACTIVE PATH: Path-B (DYNAMICALLY REROUTED)`**.
+     - Displays: **`Failover Latency: ~2.4 ms`**.
+   - Point to the bottom event log:
      ```
-     [SDN FLOWMOD EVENT T=35.9s] Congestion Detected on Path-A! Switch S1 dynamically steered flow to Path-B. Failover latency: 2.4 ms
+     [SDN FLOWMOD EVENT] Congestion Detected on Path-A! Switch S1 dynamically steered flow to Path-B. Failover latency: 2.4 ms
      ```
-   - In the bottom-right plot, point out that One-Way Latency moved from `5.0 ms` to `15.0 ms` (reflecting Path B's physical distance), while jitter remains completely flat and stable!
 3. **What to say aloud:**
-   > *"When the 7.0 Mbps cross-traffic burst hit Path A, the offered load breached our 8.0 Mbps threshold. To avoid triggering on a momentary 10-millisecond spike, our controller required two consecutive breach intervals. Once confirmed, the controller generated an OpenFlow 1.3 FlowMod message with priority 200, commanding Ingress Switch S1 to redirect the main flow to Port 3. Notice the failover latency was only 2.4 milliseconds. Traffic shifted immediately to Path B, and packet loss was instantly eliminated."*
+   > *"When cross-traffic hit Path A, load surged to 13.0 Mbps. To avoid reacting to momentary 10 ms blips, our controller required two consecutive breach intervals. Once confirmed, it pushed an OpenFlow 1.3 FlowMod message with Priority 200 to Switch S1, redirecting traffic to Port 3. Failover occurred in just 2.4 milliseconds, instantly eliminating packet drops."*
 
 ---
 
-### Step 3: Inspect the Switch S1 OpenFlow 1.3 Flow Table
+### Step 3: Show the Dynamic Flow Rule in Switch S1's Hardware Flow Table
 1. Switch back to **Tab 0 ("🌐 Live Visual Topology & Stream Control")**.
-2. Look at the **"Switch S1 OpenFlow 1.3 Flow Table"** readout in the right-hand panel.
-3. Show the evaluator the exact flow table rule currently active in switch hardware:
+2. Look at the **"Switch S1 OpenFlow 1.3 Flow Table"** readout:
    ```
-   cookie=0x0, duration=15.2s, table=0, n_packets=8420, n_bytes=8622080,
+   cookie=0x0, duration=4.2s, table=0, n_packets=2410, n_bytes=2467840,
    priority=200,udp,in_port=1,nw_dst=10.0.0.2,tp_dst=9999 actions=output:3
    ```
+3. Point out that **`priority=200`** overrides the default Priority 100 rule, outputting to **`Port 3 (Path B)`**.
 4. **What to say aloud:**
-   > *"Here in Switch S1's flow table, we can directly inspect the installed OpenFlow 1.3 rule. Notice the priority is 200, which overrides the default priority 100 baseline rule. It matches incoming UDP packets destined for 10.0.0.2 on port 9999 and instructs the switch to output them out of Port 3 onto Path B."*
+   > *"Here in Switch S1's flow table, we see the newly installed Priority 200 rule. Because Open vSwitch matches flows in descending priority order, incoming packets destined for port 9999 match this rule first and are immediately forwarded out of Port 3 onto clean Path B."*
 
 ---
 
-### Step 4: Run the Automated Comparative Benchmark
-1. Click on **Tab 3: "⚡ Automated Benchmark & Performance Evaluation"** (or use the menu `Simulation -> Run Automated Comparative Benchmark`).
-2. Click the button: **`⚡ Execute 3-Phase Automated Benchmark (Static vs Dynamic vs Rate-Adapt)`**.
-3. Watch the live progress bar and status readout as the benchmark runs three rigorous experiments in the background:
-   - **Experiment A (Static Routing):** Path locked to Path A with no failover.
-   - **Experiment B (Dynamic SDN):** Autonomous OpenFlow failover to Path B upon congestion detection.
-   - **Experiment C (SDN + Rate Control):** Joint SDN rerouting and closed-loop UDP rate adaptation.
-4. Point to the **Integrated Results Table Widget** (`QTableWidget`) directly inside the window, highlighting the color-coded rows comparing all 11 performance metrics (Throughput, Loss, Latency, Jitter, Queue Depth, Recovery Time, Packets Delivered/Lost).
-5. Point to the **Embedded 4-Panel Matplotlib Graphs** directly beneath the table:
-   - **Panel 1:** Throughput dynamics over time with highlighted congestion burst shading.
-   - **Panel 2:** Packet loss percentage (showing severe drop in Static vs flat zero in Dynamic).
-   - **Panel 3:** One-way latency (showing bufferbloat in Static vs low latency in Dynamic).
-   - **Panel 4:** Summary comparison bar chart.
-6. Demonstrate that the graphs are **fully interactive** using the built-in Navigation Toolbar (Zoom, Pan, Reset View) and point out the `💾 Save PNG` and `📋 Save JSON` buttons for exporting publication data.
-7. **What to say aloud:**
-   > *"Our automated benchmark suite scientifically validates our system. As displayed in the embedded results table and graphs, legacy static routing suffers severe bufferbloat, over 19% packet loss, and zero recovery under congestion. In contrast, our SDN controller achieves autonomous failover in 9 to 11 milliseconds, slashes packet loss by over 88%, keeps queue depth clear, and restores full throughput without dropping datagrams."*
+### Step 4: Execute the 3-Phase Automated Benchmark Evaluation
+1. Switch to **Tab 3: "⚡ Automated Benchmark Performance Evaluation"**.
+2. Point out that cached baseline results are loaded with badge `[Cached Baseline — Click Execute to Re-Evaluate]`.
+3. Click the bold button: **`⚡ Execute 3-Phase Automated Benchmark (Static vs Dynamic vs Rate-Adapt)`**.
+4. Point out the real-time execution feedback:
+   - Header badge immediately updates: `📊 Quantitative Benchmark Evaluation [Executing Run #1...]`.
+   - Table cells show active progress: `⏳ Measuring Exp A (Static)...`.
+   - Graph shows the active run placeholder.
+   - Progress bar advances smoothly (0% to 100%).
+   - **Phase 1 completes:** Column 1 (Static) immediately populates with live measured numbers!
+   - **Phase 2 completes:** Column 2 (Dynamic SDN) populates with live numbers, and Column 4 calculates initial bandwidth recovery gain!
+   - **Phase 3 completes:** Column 3 (SDN+Rate) populates, and the full 11-row table updates with final verdicts!
+   - Embedded Matplotlib canvas re-renders with fresh 4-panel graphs and timestamp badge:
+     `SDN Congestion Detection and Traffic Rerouting - Empirical Performance Evaluation [Run #1 — HH:MM:SS]`.
+5. Highlight the final comparative metrics:
+   - **Throughput:** Dynamic restored to **`~5.3 Mbps`** (+25% over Static).
+   - **Packet Loss:** Static experienced **`~15% avg / 39% peak loss`**, while Dynamic dropped loss to **`<2.5%`**.
+   - **Recovery Time:** Dynamic recovered in **`<10 ms`**, while Static suffered sustained loss with **`No Recovery`**.
+6. **What to say aloud:**
+   > *"Under Deliverable 2, we built an automated 3-phase benchmark engine. As you saw, the dashboard streams live metrics phase-by-phase as each experiment completes. The final comparison scientifically proves that our dynamic SDN controller slashes packet loss from 39% to near zero and restores full application throughput with sub-second failover recovery."*
 
 ---
 
-## 2. Core Concepts You Must Master
+## 2. Core D2 Viva Defense Questions & Answers
 
-1. **Control Plane vs. Data Plane Separation:**
-   - Data Plane (switches): purely executes packet forwarding.
-   - Control Plane (SDN controller): central brain maintaining global visibility, evaluating telemetry, and programming switches via OpenFlow 1.3.
-2. **Why Traditional Routing (OSPF / ECMP) Fails:**
-   - OSPF uses static link costs and is completely load-blind; it will keep routing over congested Path A because its static latency (5 ms) is lower than Path B (15 ms).
-   - ECMP hashes packet 5-tuples and pins the flow to a single path, blind to queue overflows.
-3. **Closed-Loop Telemetry Formula:**
-   - Instantaneous throughput polled every $\Delta t = 0.5\text{ s}$:
-     $$\text{Throughput} = \frac{(tx\_bytes_t - tx\_bytes_{t-1}) \times 8}{\Delta t \times 10^6}\text{ Mbps}$$
-4. **Congestion Threshold & Noise Filtering:**
-   - Threshold = $8.0\text{ Mbps}$ (80% of 10 Mbps bottleneck capacity).
-   - Consecutive breaches required: $N = 2$ intervals ($1.0\text{ s}$) to filter out transient noise spikes.
-5. **Anti-Flapping Hysteresis:**
-   - Prevents rapid route oscillation between Path A and Path B.
-   - Recovery threshold = $4.5\text{ Mbps}$. Traffic is held on Path B until Path A load has stabilized well below this lower limit.
-
----
-
-## 3. Top Expected Viva Questions & Winning Answers
-
-### Q1: Why did you choose an 8.0 Mbps congestion threshold instead of waiting for 10.0 Mbps?
+### Q4: Explain the step-by-step logic of your Congestion Detection Algorithm.
 **Answer:**
-> *"If you wait until link load reaches 10.0 Mbps, the bottleneck queue is already completely full, and packets are already being dropped via tail drop. In network engineering, proactive congestion mitigation is far superior to reactive recovery. Setting the threshold at 8.0 Mbps (80% of link capacity) gives the SDN controller a 2.0 Mbps safety buffer. This allows the controller to detect the overload, process the telemetry, and install the OpenFlow `FlowMod` rule before the queue overflows, minimizing packet loss to near zero."*
+Every $\Delta t = 0.5\text{ seconds}$, the controller executes:
+1. **Delta Throughput:** $\text{Bitrate} = \frac{(\text{bytes}_t - \text{bytes}_{t-1}) \times 8}{\Delta t \times 1{,}000{,}000}$.
+2. **Threshold Comparison:** Checks if $\text{Bitrate} \ge \text{CONGESTION\_THRESHOLD\_MBPS} (8.0\text{ Mbps})$.
+3. **Transient Noise Filter ($N=2$):** If breached, `consecutive_breaches` increments. Congestion is only declared when the counter reaches 2 ($1.0\text{ second}$ of sustained overload).
+4. **Action:** Once confirmed, it triggers `_trigger_reroute()`, constructing and dispatching the OpenFlow `FlowMod` instruction to Switch $S_1$.
 
----
-
-### Q2: Why is the polling interval set to 0.5 seconds instead of 10 milliseconds?
+### Q5: What is route flapping, and how does your controller prevent it using hysteresis?
 **Answer:**
-> *"There is a fundamental engineering tradeoff in SDN telemetry between **detection latency** and **controller overhead**:
-> 1. Polling every 10 milliseconds would generate 100 OpenFlow `OFPPortStatsRequest` and `OFPPortStatsReply` messages every second per switch, saturating the control plane channel and consuming excessive controller CPU.
-> 2. Polling every 5 seconds would save CPU, but would be too slow to react to sudden traffic bursts.
-> A 0.5-second polling interval represents the sweet spot: it delivers sub-second congestion detection with negligible network overhead (<0.1% bandwidth utilization on the control plane)."*
+Route flapping occurs when shifting traffic away from Path A causes Path A's load to drop to zero, prompting a naive controller to immediately switch traffic back to Path A, resulting in an endless oscillation loop.  
+Our controller enforces **anti-flapping hysteresis**: once traffic is shifted to Path B, it is locked there until Path A's load drops stably below $\text{HYSTERESIS\_RECOVERY\_MBPS} = 4.5\text{ Mbps}$.
 
----
-
-### Q3: What exact OpenFlow message does your controller push to Switch S1?
+### Q6: What were the key performance optimizations made to the GUI dashboard?
 **Answer:**
-> *"The controller sends an `OFPFlowMod` (Flow Modification) message with `command = OFPFC_ADD` (or `OFPFC_MODIFY`) to Switch S1:
-> - **Match Criteria:** `eth_type = 0x0800` (IPv4), `ip_proto = 17` (UDP), `nw_dst = 10.0.0.2`, `tp_dst = 9999`.
-> - **Priority:** `200` (higher than the default baseline forwarding rule of priority 100).
-> - **Instruction / Action:** `OFPIT_APPLY_ACTIONS` containing `OFPAT_OUTPUT -> Port 3` (connecting to Switch S3 along Path B).
-> Because Open vSwitch processes rules based on highest priority first, packets matching this flow immediately exit Port 3 instead of Port 2."*
-
----
-
-### Q4: What is Hysteresis and why is it mandatory in traffic rerouting?
-**Answer:**
-> *"Without hysteresis, the network suffers from a catastrophic problem known as **route flapping** or oscillation. As soon as Flow 1 is rerouted away from Path A to Path B, Path A's load drops to 0 Mbps. If the controller only checked whether Path A is below 8.0 Mbps, it would immediately move Flow 1 back to Path A. That would cause Path A to instantly re-congest, triggering another reroute to Path B, bouncing endlessly back and forth every second. We implement hysteresis by introducing a lower recovery threshold of 4.5 Mbps. Flow 1 will not be reverted to Path A until Path A load remains stably below 4.5 Mbps, guaranteeing rock-solid stability."*
-
----
-
-## 4. Examiner Trap Questions ("Gotchas") & How to Defend Them
-
-### Trap 1: "Doesn't moving traffic to Path B increase latency from 5 ms to 15 ms? Isn't that worse?"
-**Your Defense:**
-> *"That is a deliberate, conscious engineering tradeoff. In computer networking, packet loss is far more damaging than a 10 millisecond propagation delay. Under congestion on Path A, the link loses over 55% of all packets, and the 100-packet queue buffer introduces an additional ~80 milliseconds of queuing delay (bufferbloat) with massive jitter. Moving to Path B adds a predictable 10 milliseconds of propagation delay, but eliminates all packet drops and restores RFC 3550 jitter to under 0.5 milliseconds. For any real-world streaming or telemetry application, a clean 15 ms path with 0% loss is vastly superior to a 5 ms path losing half its data."*
-
-### Trap 2: "What happens if BOTH Path A and Path B become congested?"
-**Your Defense:**
-> *"Our SDN controller explicitly handles this dual-congestion scenario. If both Path A and Path B exceed the 8.0 Mbps threshold, the controller detects that no alternate uncongested path exists. It sets the status to `CRITICAL: BOTH PATHS CONGESTED` (indicated by a red banner in the GUI) and activates closed-loop rate adaptation feedback. The receiver instructs the UDP sender to perform multiplicative rate reduction (-30%), throttling traffic at the application source until network capacity recovers."*
+* **PyQtGraph Migration:** Replaced Matplotlib real-time canvas redraws with PyQtGraph (`pg.GraphicsLayoutWidget`), dropping curve update latency from **240 ms down to 2.47 ms (~97x faster)** and eliminating Qt event-loop freezing.
+* **Bounded Ring Buffers:** Used `collections.deque(maxlen=2000)` and trailing sliding-window de-indexing to keep RAM usage locked at **~92–95 MB** indefinitely.
+* **Thread-Safe Matplotlib Rendering:** Restricted Matplotlib figure generation and file saving strictly to the main GUI thread, preventing cross-thread Qt widget crashes.

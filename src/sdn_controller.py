@@ -11,6 +11,7 @@ Features:
 
 import time
 import subprocess
+import shutil
 import threading
 import json
 import logging
@@ -85,6 +86,7 @@ class SDNController:
         self.congestion_detected_time: Optional[float] = None
         self.reroute_completed_time: Optional[float] = None
         self.recovery_time_sec: Optional[float] = None
+        self._has_ovs: bool = (shutil.which("ovs-ofctl") is not None)
 
     def start(self):
         """Starts the background telemetry monitor."""
@@ -108,6 +110,9 @@ class SDNController:
         Polls live OpenFlow 1.3 switch port statistics directly from Open vSwitch
         when running inside a real Mininet / Linux environment.
         """
+        if not self._has_ovs:
+            return
+
         try:
             res = subprocess.run(
                 ["ovs-ofctl", "-O", "OpenFlow13", "dump-ports", "s1"],

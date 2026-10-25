@@ -1,7 +1,6 @@
-# Study Guide 1: Transport Layer, Low-Level UDP Sockets & Custom Binary Protocol
+# Study Guide 1: Transport Layer, Low-Level UDP Sockets & Protocol Engineering
 
-## Subsystem 1: Application Endpoints & Transport Layer Engineering
-**Component Focus:** Socket Programming, Binary Datagram Protocol, Rate Pacing, and End-to-End Telemetry Measurement  
+**Component Focus:** Socket Programming, Binary Datagram Protocol, Rate Pacing, Multi-Flow Traffic Generation, and End-to-End Telemetry  
 **Owned Project Files:**
 - [`src/protocol.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/protocol.py) — Custom 22-byte binary protocol serialization/deserialization
 - [`src/udp_sender.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/udp_sender.py) — Low-level rate-paced UDP client with monotonic timer
@@ -10,30 +9,38 @@
 
 ---
 
-## 1. What This Subsystem Does (Plain English Overview)
+# ================================================================
+# PART 1: DELIVERABLE 1 (D1 — FOUNDATION - 15 MARKS)
+# ================================================================
 
-In any computer network, switches, cables, and routers do not generate data by themselves—end-user applications do. This subsystem represents the **Endpoints** (the Sender and Receiver hosts) that sit at the edges of the network.
-
-Think of this subsystem as the **traffic generator and performance auditor**:
-1. **The Sender:** Acts like a high-speed courier that packs data boxes (UDP packets) and dispatches them onto the road at a strict, controlled speed (e.g., exactly 6.0 Mbps).
-2. **The Custom Header:** Stamps a special 22-byte digital label onto every single box. This label tells the receiver which sequence number the box is, the microsecond it left the sender, and whether it is high-priority mission traffic or cross-traffic.
-3. **The Receiver:** Sits at the destination endpoint, catches every arriving packet, and acts like a network doctor. By examining sequence numbers and timestamps, it calculates whether packets were lost on the road, how long they took to travel (one-way latency), and whether packet delivery was smooth or jittery (RFC 3550 jitter).
-4. **The Congestion Generator:** Deliberately launches a massive flood of background traffic (7.0 Mbps) onto the same shared highway. Because 6.0 Mbps + 7.0 Mbps = 13.0 Mbps (which exceeds the 10.0 Mbps highway capacity), this intentionally triggers traffic congestion to test the network's resilience.
+## 1. What to Explain for Deliverable 1
+In Deliverable 1, your role is to explain **how end-hosts talk across the network at the raw socket level** before any congestion occurs:
+1. How we created raw BSD sockets using Python's native `socket` library without high-level wrappers.
+2. Why we chose UDP over TCP for real-time mission traffic.
+3. How we engineered a custom 22-byte binary protocol header using `struct.Struct` in Big-Endian network byte order.
+4. How the sender accurately paces traffic at exactly 6.0 Mbps without timer drift.
+5. How the receiver measures sequence continuity, one-way latency ($T_{\text{recv}} - T_{\text{send}}$), and RFC 3550 jitter.
 
 ---
 
-## 2. Behind the Scenes: How the Technology Works Step-by-Step
+## 2. D1 Behind the Scenes: How the Sockets Work Step-by-Step
 
-### A. What is a UDP Socket at the OS Level?
-A network socket is an application's doorway to the operating system's networking stack:
-* When Python calls `socket.socket(socket.AF_INET, socket.SOCK_DGRAM)`, the operating system allocates a kernel-level data structure for handling User Datagram Protocol (UDP) traffic.
+### A. Raw UDP Socket Creation at the OS Level
+When the application starts, it creates a UDP socket:
+```python
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+```
+* `AF_INET`: Specifies IPv4 addressing.
+* `SOCK_DGRAM`: Specifies connectionless User Datagram Protocol (UDP).
 * **Why UDP instead of TCP?**
-  - TCP has built-in congestion control (like Cubic or Reno). If network congestion occurs, TCP senders automatically slow down by shrinking their congestion window (`cwnd`).
-  - UDP has **zero built-in congestion control, zero flow control, and zero retransmissions**. A UDP application will pump datagrams as fast as the code instructs it, even if queues overflow and every packet gets dropped.
-  - Real-time applications—such as live video streaming, VoIP phone calls, and gaming telemetry—use UDP because they cannot tolerate TCP retransmission delays. This makes UDP the ideal, mandatory protocol for demonstrating **Software-Defined Network (SDN) dynamic traffic rerouting**: because the endpoints cannot fix congestion on their own, the network itself must step in.
+  - TCP has built-in congestion control (AIMD, Reno, Cubic). When packets are dropped, TCP senders throttle themselves back.
+  - UDP has **zero built-in congestion control, zero flow control, and zero retransmissions**. A UDP sender blasts packets regardless of network state.
+  - Real-time applications (VoIP, video conferencing, live telemetry) require UDP because they cannot tolerate TCP retransmission stalls. Because UDP endpoints cannot self-heal congestion, an external intelligence layer (SDN) is required.
+
+---
 
 ### B. Custom 22-Byte Binary Protocol Header (`src/protocol.py`)
-Rather than sending unstructured text or slow, bloated JSON/XML strings, we engineer an ultra-compact **22-byte C-style binary header** packed in network byte order (Big-Endian).
+Rather than sending slow, heavy JSON or text strings, every packet contains an ultra-compact **22-byte C-style binary header** packed in Big-Endian network byte order:
 
 ```
  0                   1                   2                   3
@@ -53,107 +60,145 @@ Rather than sending unstructured text or slow, bloated JSON/XML strings, we engi
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
-#### Why Big-Endian (`!`) and Pre-Compiled `struct.Struct`?
-1. **Network Byte Order (`!`):** Internet standards dictate that multi-byte integers are transmitted with the most significant byte first (Big-Endian). Using `!` ensures consistent binary interpretation whether running on an x86 Intel/AMD CPU (Little-Endian) or an ARM chip.
-2. **Pre-Compiled `struct.Struct`:** Calling `struct.pack("!4sIdHBBH", ...)` on every single datagram causes Python to re-parse the format string millions of times. We pre-compile it once (`HEADER_STRUCT = struct.Struct("!4sIdHBBH")`), speeding up packet packing by **~2.8x**.
-
-#### Breakdown of the Header Fields:
-1. `Magic (4 Bytes - b"SDN1")`: A security and integrity tag. If stray packets from other programs hit our port, the receiver drops them immediately.
-2. `Sequence Number (4 Bytes - unsigned int)`: Starts at 0 and counts up (0, 1, 2, 3...). If the receiver sees packet 10 arrive immediately after packet 7, it knows mathematically that 2 packets were lost in the network.
-3. `Timestamp (8 Bytes - double float)`: Recorded using `time.time()` at the exact moment of transmission. When the receiver catches the packet, it subtracts the send time from the arrival time to measure **one-way latency**:
+#### Detailed Header Breakdown:
+1. **Magic (`4 Bytes - b"SDN1"`):** Packet validation tag. Rejects stray or malformed packets from other processes immediately.
+2. **Sequence Number (`4 Bytes - uint32`):** Starts at 0 and increments sequentially (`0, 1, 2, 3...`). Enables the receiver to detect lost or out-of-order packets.
+3. **Timestamp (`8 Bytes - double float`):** High-precision transmission time recorded with `time.time()`. Receiver subtracts this from arrival time to compute **one-way latency**:
    $$\text{Latency} = (T_{\text{arrival}} - T_{\text{send}}) \times 1000\text{ ms}$$
-4. `Flow ID (2 Bytes)`: Differentiates traffic types:
-   - `FLOW_MAIN = 1` ($H_1 \rightarrow H_2$ primary high-priority stream)
-   - `FLOW_CROSS = 2` ($H_3 \rightarrow H_4$ congestion burst traffic)
-5. `Flags (1 Byte)`: Bitmask flags signaling lifecycle events: `FLAG_START (0x02)`, `FLAG_DATA (0x01)`, `FLAG_FIN (0x04)`, and `FLAG_FEEDBACK (0x10)`.
-6. `Reserved (1 Byte)`: Alignment byte to keep memory on 32-bit word boundaries.
-7. `Payload Length (2 Bytes)`: The byte count of the dummy payload following the header.
+4. **Flow ID (`2 Bytes`):** Identifies traffic streams:
+   - `FLOW_MAIN = 1` ($H_1 \rightarrow H_2$ primary stream)
+   - `FLOW_CROSS = 2` ($H_3 \rightarrow H_4$ cross-traffic burst)
+5. **Flags (`1 Byte`):** Bitmask signaling lifecycle states: `FLAG_START (0x02)`, `FLAG_DATA (0x01)`, `FLAG_FIN (0x04)`, `FLAG_FEEDBACK (0x10)`.
+6. **Reserved (`1 Byte`):** Padding byte for 32-bit CPU memory alignment.
+7. **Payload Length (`2 Bytes`):** Size of dummy payload following the header (typically 1002 bytes, making the entire datagram 1024 bytes).
+
+#### Why Big-Endian (`!`) and Pre-Compiled `struct.Struct`?
+* **Network Byte Order (`!`):** Mandates that multi-byte integers are transmitted with the most significant byte first, guaranteeing identical packet parsing across x86 (Little-Endian) and ARM CPUs.
+* **Pre-compiled `struct.Struct("!4sIdHBBH")`:** Avoids re-parsing format strings on every packet, speeding up serialization by **~2.8x**.
 
 ---
 
 ### C. Rate Pacing & Monotonic Drift Compensation (`src/udp_sender.py`)
-Transmitting data at a target rate (e.g., 6.0 Mbps) is harder than it sounds. If a program simply does `time.sleep(interval)` in a loop, standard OS schedulers introduce **timer drift**—sleeping slightly too long on every packet, resulting in an actual rate far lower than requested.
+To maintain an exact transmission rate (e.g., 6.0 Mbps), the sender calculates inter-packet interval:
+$$\text{Interval} = \frac{\text{Packet Size (Bytes)} \times 8}{\text{Target Rate (bps)}} = \frac{1024 \times 8}{6{,}000{,}000} \approx 1.365\text{ ms}$$
 
-To solve this, our sender implements **monotonic drift compensation**:
+Standard OS timers drift over time. Our sender uses **monotonic drift compensation** with `time.perf_counter()`:
 ```python
 next_send_time += self._packet_interval
 sleep_duration = next_send_time - time.perf_counter()
 if sleep_duration > 0.0005:
     time.sleep(sleep_duration)
 elif sleep_duration < -0.05:
-    # Lagging by >50ms, resynchronize clock baseline
-    next_send_time = time.perf_counter()
+    next_send_time = time.perf_counter() # Resync clock if lagging
 ```
-- We calculate the time interval between packets:
-  $$\text{Interval (s)} = \frac{\text{Packet Size (Bytes)} \times 8}{\text{Target Rate (bps)}}$$
-  For 1024-byte packets at 6.0 Mbps, a packet must be dispatched every **1.365 milliseconds**.
-- We use `time.perf_counter()` because it is strictly monotonic and unaffected by system clock adjustments.
-- If the OS scheduler sleeps too long on one iteration, `sleep_duration` becomes smaller on the next iteration, automatically catching up and eliminating cumulative drift.
+This guarantees an unwavering 6.0 Mbps data rate without cumulative timer lag.
 
 ---
 
-### D. Receiver Telemetry & Sliding Window Metrics (`src/udp_receiver.py`)
-The receiver uses a dedicated worker thread running a high-speed socket loop:
-1. **OS Receive Buffer Tuning:** We explicitly expand the socket buffer to 2 MB using `SO_RCVBUF`. Standard OS buffers (64 KB) can easily overflow during 10 Mbps bursts, dropping packets inside the host before Python reads them.
-2. **RFC 3550 Inter-Arrival Jitter Calculation:**
-   Jitter measures the statistical variance (instability) of packet delivery times. High jitter causes robotic voices in VoIP and stuttering in video streams. We implement the RFC 3550 standard algorithm:
-   - For consecutive packets $i$ and $j$, calculate the difference in transit times:
-     $$D(i, j) = |(R_j - S_j) - (R_i - S_i)|$$
-   - Smooth the jitter estimate using an exponential moving average low-pass filter ($\alpha = 1/16$):
-     $$J = J + \frac{D(i, j) - J}{16}$$
-3. **Sliding Window Telemetry:**
-   Every 500 ms, the receiver flushes a telemetry snapshot:
-   - $\text{Throughput (Mbps)} = \frac{\text{Window Bytes} \times 8}{\Delta t \times 10^6}$
-   - $\text{Packet Loss Rate (\%)} = \frac{\text{Lost Packets}}{\text{Received Packets} + \text{Lost Packets}} \times 100\%$
+### D. Receiver Telemetry & Sliding-Window Metrics (`src/udp_receiver.py`)
+The receiver runs a dedicated thread listening on port 9999 with an expanded **2 MB socket buffer** (`SO_RCVBUF`):
+1. **Packet Loss Detection:** Compares arriving `seq` against `expected_seq`:
+   $$\text{Dropped Packets} = \text{seq} - \text{expected\_seq}$$
+2. **RFC 3550 Inter-Arrival Jitter:**
+   For consecutive packets $i$ and $j$, transit difference is $D(i, j) = |(R_j - S_j) - (R_i - S_i)|$.  
+   Jitter is smoothed using a low-pass filter ($\alpha = 1/16$):
+   $$J_i = J_{i-1} + \frac{D(i, j) - J_{i-1}}{16}$$
+3. **Sliding-Window Throughput:**
+   Calculated over 500 ms sampling windows:
+   $$\text{Throughput (Mbps)} = \frac{\text{Window Bytes} \times 8}{\Delta t \times 10^6}$$
+
+---
+
+# ================================================================
+# PART 2: DELIVERABLE 2 (D2 — ADVANCED FUNCTIONALITY - 25 MARKS)
+# ================================================================
+
+## 1. What to Explain for Deliverable 2
+In Deliverable 2, your role is to explain **what happens when the network experiences overload and how the transport layer interacts with advanced SDN capabilities**:
+1. How multi-flow traffic is generated using the Cross-Traffic Congestion Generator.
+2. How injecting 7.0 Mbps of cross-traffic causes total offered load to hit 13.0 Mbps (130% of link capacity).
+3. Why UDP traffic collapses without SDN (bufferbloat, tail drop, >50% packet loss).
+4. How the receiver measures sub-second recovery when the SDN Controller redirects the flow to Path B.
+5. How client-side Closed-Loop Rate Adaptation works when both paths are congested.
+
+---
+
+## 2. D2 Behind the Scenes: Advanced Mechanics Step-by-Step
+
+### A. Multi-Flow Cross-Traffic Burst Generator (`src/congestion_generator.py`)
+To test network resilience, we launch a secondary sender:
+* Binds to a separate socket and injects packets tagged with `FLOW_CROSS = 2` directed to port 9000 (ingress switch).
+* Generates **7.0 Mbps** of unyielding UDP traffic during the congestion burst window.
+* Combined load on Path A:
+  $$\text{Total Offered Load} = 6.0\text{ Mbps (Main)} + 7.0\text{ Mbps (Cross)} = 13.0\text{ Mbps}$$
+  This is **130%** of the 10.0 Mbps bottleneck link capacity.
+
+---
+
+### B. What Happens to UDP Under Congestion (Without SDN Rerouting)
+Because UDP has no congestion window:
+1. Switch queues fill to capacity (100 packets), causing **bufferbloat** (latency spikes from 5 ms to 100+ ms).
+2. Excess packets are discarded at the switch via **tail drop**.
+3. The receiver records:
+   - Packet loss surging to **35% - 55%**.
+   - Throughput collapsing from 6.0 Mbps down to **2.5 - 3.5 Mbps**.
+   - Jitter fluctuating erratically due to varying queue wait times.
+
+---
+
+### C. Observing Dynamic SDN Recovery at the Receiver
+When the SDN Controller detects congestion and executes an OpenFlow `FlowMod` to Path B:
+1. Main packets immediately begin arriving via Path B.
+2. Sequence continuity resumes: packet loss drops instantly back to **0.0%**.
+3. Throughput restores to full **6.0 Mbps**.
+4. One-way latency shifts to **~15.0 ms** (reflecting Path B's physical link delay), confirming the route change occurred.
+
+---
+
+### D. Closed-Loop Rate Adaptation (SDN + Source Throttling)
+In extreme scenarios where both Path A and Path B are congested:
+* The receiver detects sustained packet loss even after rerouting.
+* The receiver sends a lightweight **Feedback Packet (`FLAG_FEEDBACK`)** back to the sender on port 9005.
+* Upon receiving feedback, the sender dynamically scales back its sending rate:
+  $$\text{New Rate} = \max(2.0\text{ Mbps}, \text{Current Rate} \times 0.75)$$
+* Once congestion subsides, the sender gradually probes upward back to nominal rate, demonstrating **transport-level closed-loop backpressure**.
 
 ---
 
 ## 3. How Subsystem 1 Complements the Other Two Subsystems
 
 ```
-+-------------------------------------------------------------------------------+
-|                        THE THREE-PART FEEDBACK LOOP                           |
-+-------------------------------------------------------------------------------+
-
-[Subsystem 1: UDP Sockets]
+[Subsystem 1: UDP Endpoints]
        |
-       | 1. Pumps 6.0 Mbps Main UDP Stream + 7.0 Mbps Congestion Burst
+       | 1. Generates 6.0 Mbps Main Stream + 7.0 Mbps Cross Burst
        v
 [Subsystem 2: Network Infrastructure & Virtual Switches]
        |
-       | 2. Bottleneck Link (10 Mbps capacity, 100-packet buffer) hits 13 Mbps
-       | 3. Queue overflows -> physical tail-drop packet loss begins
+       | 2. Bottleneck Link (10 Mbps, 100-pkt queue) hits 13 Mbps
+       | 3. Buffer overflows -> tail-drop packet loss begins
        | 4. Switch S1 records rising tx_bytes on Port 2
        v
 [Subsystem 3: SDN Controller & Telemetry]
        |
-       | 5. Polls Port 2 counters, calculates load = 13.0 Mbps >= 8.0 Mbps threshold
+       | 5. Polls Port 2 counters, detects load >= 8.0 Mbps threshold
        | 6. Sends OpenFlow FlowMod instruction to Switch S1
        v
-[Subsystem 2: Switch S1 Forwarding Table Updated]
+[Subsystem 2: Switch S1 Forwarding Table]
        |
        | 7. Main stream redirected from Port 2 (Path A) to Port 3 (Path B)
        v
 [Subsystem 1: UDP Receiver Endpoint]
        |
-       | 8. Detects immediate recovery: packet loss drops from 55% back to 0.0%
-       +------------------------------------------------------------------------+
+       | 8. Detects immediate recovery: packet loss drops from 50%+ back to 0.0%
 ```
-
-1. **Complementing Subsystem 2 (Network Infrastructure):**
-   - Subsystem 2 builds the virtual switches ($S_1, S_2, S_3, S_4$) and the 10 Mbps bottleneck links. Without Subsystem 1's socket programs, the network is an empty shell with no traffic.
-   - When Subsystem 2's bottleneck link queue fills up, Subsystem 1's receiver is what mathematically measures the resulting packet loss and latency changes.
-2. **Complementing Subsystem 3 (SDN Control Plane):**
-   - Subsystem 3 needs traffic to monitor. Subsystem 1 generates the 6.0 Mbps stream and injects the 7.0 Mbps cross-traffic burst that triggers Subsystem 3's 8.0 Mbps threshold breach.
-   - When Subsystem 3 executes a dynamic reroute, Subsystem 1's receiver provides the definitive proof of success: throughput is restored to 6.0 Mbps, and packet loss drops to zero.
 
 ---
 
-## 4. Key Libraries & Why They Were Chosen
+## 4. Key Libraries & Technical Justifications
 
 | Library / Module | Purpose in Subsystem 1 | Technical Justification |
 | :--- | :--- | :--- |
-| **`socket`** (Standard Library) | Creates raw UDP datagram sockets (`AF_INET`, `SOCK_DGRAM`), sets socket options (`SO_RCVBUF`, `SO_SNDBUF`). | Satisfies the requirement for low-level socket programming without relying on heavy third-party application abstractions. |
+| **`socket`** (Standard Library) | Creates raw UDP sockets (`AF_INET`, `SOCK_DGRAM`), sets socket options (`SO_RCVBUF`, `SO_SNDBUF`). | Satisfies the requirement for low-level socket programming without relying on high-level HTTP abstractions. |
 | **`struct`** (Standard Library) | Serializes binary numbers and byte strings into exact C-style struct memory blocks (`struct.Struct`). | Blazing fast $O(1)$ packing time with zero string parsing. Uses only 22 bytes per packet compared to 200+ bytes for JSON. |
 | **`time.perf_counter`** | Nanosecond-resolution monotonic clock for rate pacing. | Unlike `time.time()`, it never jumps backwards when the OS synchronizes time via NTP, preventing packet burst artifacts. |
 | **`threading`** | Runs packet transmission and socket receiving concurrently. | Prevents console logging or file I/O from blocking the time-critical packet reception loop. |

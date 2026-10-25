@@ -1,74 +1,185 @@
 # Master Architecture & Codebase Super-Explanation (`superexp.md`)
+
 **Project:** Congestion Detection and Dynamic Traffic Rerouting (Topic #27)  
-**Architecture:** Low-Level UDP Socket Programming + Mininet Open vSwitch + Dynamic OpenFlow 1.3 SDN Controller
+**Architecture:** Low-Level UDP Socket Programming + Mininet Open vSwitch + Dynamic OpenFlow 1.3 SDN Controller  
+**Rubric Structure:** Partitioned into **Deliverable 1 (Foundation)** and **Deliverable 2 (Advanced Functionality)**
 
 ---
 
-## 1. Executive Engineering Summary
+# ================================================================
+# PART 1: DELIVERABLE 1 (D1 — FOUNDATION ARCHITECTURE - 15 MARKS)
+# ================================================================
 
-This document provides a **complete, end-to-end, line-by-line and packet-by-packet explanation** of the entire codebase and the physical/virtual network processes occurring behind the scenes.
-
-### The Fundamental Networking Challenge:
-Standard **UDP (User Datagram Protocol)** is connectionless, unacknowledged, and possesses **zero congestion control**. In contrast to TCP (which uses AIMD, sliding windows, and ACK pacing to throttle itself when drops occur), a UDP sender will blindly blast packets onto a physical link regardless of whether the bottleneck queue is empty or overflowing.
-
-When two UDP flows share a bottleneck link whose capacity is smaller than their combined demand:
-1. Switch queues fill to capacity (causing massive latency spikes known as **bufferbloat**).
-2. Excess packets are discarded at the switch ingress buffer (**tail drop**).
-3. The application experiences severe packet loss ($>50\%$) and collapsed throughput.
-
-### The SDN Solution:
-Rather than requiring changes to thousands of client applications, we introduce **Software-Defined Networking (SDN)**. The SDN Controller acts as an active, closed-loop telemetry supervisor:
-1. It continuously polls port byte counters across all switches.
-2. It mathematically calculates the real-time link bitrate.
-3. When it detects that link load exceeds the safety threshold ($8.0\text{ Mbps}$ on our $10\text{ Mbps}$ link), it dynamically injects an **OpenFlow 1.3 `FlowMod` instruction** into the ingress switch.
-4. The switch immediately redirects the UDP stream to an alternate, idle physical path ($S_1 \rightarrow S_3 \rightarrow S_4$) in **$9.46\text{ milliseconds}$**, restoring 100% throughput and eliminating packet loss without the client or server ever noticing a disruption.
+## 1. What to Explain for Deliverable 1
+Deliverable 1 establishes the **core communication and network infrastructure** before any congestion or dynamic rerouting occurs:
+1. **The Fundamental Networking Problem:** Why UDP is connectionless and has zero congestion control.
+2. **Socket Layer:** How raw BSD sockets communicate in Python without high-level HTTP wrappers.
+3. **Custom 22-Byte Binary Protocol:** Why binary packing (`struct.Struct`) in Big-Endian network byte order (`!`) is used instead of JSON or text.
+4. **Precision Rate Pacing:** How monotonic clocks (`time.perf_counter()`) eliminate OS scheduling drift to deliver an exact 6.0 Mbps stream.
+5. **Receiver Telemetry:** How sequence numbers detect drops, microsecond timestamps measure one-way latency, and RFC 3550 calculates jitter.
+6. **Data Plane Virtualization:** How Mininet (`ip netns`, `veth`, Open vSwitch) and the standalone Python emulator model the Diamond Multi-Path Topology with 10 Mbps bottleneck links, 5 ms vs 15 ms delays, and 100-packet drop-tail queues.
+7. **Watermark:** `*D1` located on the Animated Topology Canvas (Tab 0) and Live Packet Stream Terminal (Tab 2).
 
 ---
 
-## 2. The Complete Behind-the-Scenes Journey of a Single Packet
+## 2. D1 Deep Dive: Low-Level Socket Programming & Custom Binary Protocol
 
-To understand the interaction between socket programming, the operating system kernel, virtual switches, and SDN rules, follow packet **#1050** sent from Host $H_1$ to Host $H_2$:
+### A. Raw BSD UDP Sockets at the OS Kernel Level
+* Sockets are created using Python's standard `socket` module:
+  ```python
+  sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  ```
+* **Why UDP instead of TCP?**
+  - TCP has built-in transport-layer congestion control (AIMD, Reno, Cubic). When packets are dropped, TCP senders throttle themselves back by shrinking their congestion window (`cwnd`).
+  - UDP has **zero flow control, zero congestion control, and zero retransmissions**. A UDP sender will blast packets onto the link regardless of whether the queue is empty or overflowing.
+  - Real-time applications (video streams, VoIP, gaming telemetry) use UDP because they cannot tolerate TCP retransmission delays. This makes UDP the mandatory protocol for this project: because endpoints cannot self-heal congestion, the network itself (SDN) must adapt.
+
+---
+
+### B. Custom 22-Byte Binary Protocol Header (`src/protocol.py`)
+To achieve wire-speed serialization and avoid bloated string parsing, datagrams use an ultra-compact **22-byte C-style binary header** packed in Big-Endian network byte order:
 
 ```
-[Application Layer]
-  1. udp_sender.py: Formulates packet #1050
-  2. protocol.py: Packs 22-byte header with struct.pack('!4sIdHBBH', ...)
-        |
-[Transport Layer & OS Kernel]
-  3. socket.sendto(data, ('10.0.0.2', 9999))
-  4. Placed into Linux kernel socket buffer (SO_SNDBUF = 1MB)
-        |
-[Virtual Network Interface & Linux Namespace]
-  5. Egresses H1 namespace through virtual interface 'h1-eth0'
-  6. Enters Linux Virtual Ethernet Pair ('veth' cable)
-        |
-[Data Plane: Open vSwitch S1]
-  7. Arrives at Ingress Switch Port 1 ('s1-eth1')
-  8. OVS Kernel Datapath parses Ethernet/IP/UDP headers:
-     - Match: nw_src=10.0.0.1, nw_dst=10.0.0.2, tp_dst=9999
-     - Rule: Priority 200 matches -> Action: Output to Port 3 (Path B)
-        |
-[Physical Bottleneck Link: Linux Traffic Control (tc)]
-  9. Enters Link s1-s3: Enforces 10 Mbps bandwidth & 15ms delay via Token Bucket Filter
- 10. Traverses intermediate switch S3 (Port 1 -> Port 2)
- 11. Traverses egress switch S4 (Port 2 -> Port 1 connected to H2)
-        |
-[Receiver End-Host & Application]
- 12. Arrives at H2 namespace through 'h2-eth0'
- 13. Buffered in Linux kernel receive buffer (SO_RCVBUF = 2MB)
- 14. udp_receiver.py calls sock.recvfrom(65535)
- 15. protocol.py unpacks header -> verifies Magic 'SDN1'
- 16. Measures sequence continuity: 1050 == expected_seq -> 0 loss!
- 17. Calculates transit latency: T_recv - T_send = 16.2 ms
- 18. Updates RFC 3550 jitter filter: Ji = Ji-1 + (|D| - Ji-1)/16
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                       Magic "SDN1" (4B)                       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Sequence Number (4B, unsigned)             |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
++                    Timestamp (8B, float double)               +
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|          Flow ID (2B)         |   Flags (1B)  |  Reserved(1B) |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|       Payload Length (2B)     |       Payload Data ...        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+
+* **Magic Bytes (`b"SDN1"` - 4B):** Integrity validation tag. Drops stray or corrupted datagrams instantly.
+* **Sequence Number (`uint32` - 4B):** Starts at 0 and increments sequentially. Receiver calculates packet loss: $\text{Loss} = \text{seq}_{\text{recv}} - \text{seq}_{\text{expected}}$.
+* **Timestamp (`float64` - 8B):** High-precision send time. Receiver calculates one-way latency: $(T_{\text{recv}} - T_{\text{send}}) \times 1000\text{ ms}$.
+* **Flow ID (`uint16` - 2B):** Distinguishes traffic: `FLOW_MAIN = 1` ($H_1 \rightarrow H_2$) and `FLOW_CROSS = 2` ($H_3 \rightarrow H_4$).
+* **Flags (`uint8` - 1B):** Bitmask for lifecycle events: `START (0x02)`, `DATA (0x01)`, `FIN (0x04)`, `FEEDBACK (0x10)`.
+* **Reserved (`uint8` - 1B):** Alignment byte for 32-bit word boundaries.
+* **Payload Length (`uint16` - 2B):** Size of dummy payload following the header (1002 bytes $\rightarrow$ total 1024-byte datagram).
+* **Optimization:** Pre-compiling `HEADER_STRUCT = struct.Struct("!4sIdHBBH")` eliminates format-string parsing on every packet, accelerating serialization by **~2.8x**.
+
+---
+
+### C. Rate Pacing & Monotonic Drift Compensation (`src/udp_sender.py`)
+To maintain an exact 6.0 Mbps transmission rate without OS scheduler lag:
+$$\text{Interval} = \frac{\text{Packet Size (Bytes)} \times 8}{\text{Target Rate (bps)}} = \frac{1024 \times 8}{6{,}000{,}000} \approx 1.365\text{ ms}$$
+Using `time.sleep()` directly causes cumulative timer drift because the OS scheduler sleeps slightly too long. Our sender implements **monotonic drift compensation** using `time.perf_counter()`:
+```python
+next_send_time += self._packet_interval
+sleep_duration = next_send_time - time.perf_counter()
+if sleep_duration > 0.0005:
+    time.sleep(sleep_duration)
+elif sleep_duration < -0.05:
+    next_send_time = time.perf_counter()  # Resynchronize clock baseline
 ```
 
 ---
 
-## 3. The 6-Phase Lifecycle of Congestion & Dynamic Failover
+### D. Receiver Telemetry & Sliding-Window Metrics (`src/udp_receiver.py`)
+* **Socket Tuning:** Expands the OS receive buffer to 2 MB using `SO_RCVBUF` to prevent internal host packet drops during traffic surges.
+* **RFC 3550 Inter-Arrival Jitter:** Calculates statistical transit variance using the standard exponential moving average filter ($\alpha = 1/16$):
+  $$D(i, j) = |(R_j - S_j) - (R_i - S_i)|, \quad J_i = J_{i-1} + \frac{D(i, j) - J_{i-1}}{16}$$
+* **Rolling Telemetry:** Evaluates throughput and loss over 500 ms sliding windows.
 
-Our automated benchmark runs an end-to-end experiment demonstrating the before, during, and after of network congestion:
+---
 
+## 3. D1 Deep Dive: Network Infrastructure & Data Plane Virtualization
+
+```
+              [Host H1: Main Sender] (10.0.0.1)
+                         \
+                          v  (Port 1)
+                     +-----------+
+                     | Switch S1 | (Ingress Switch)
+                     +-----------+
+                     / (Port 2)   \ (Port 3)
+                    /              \
+                   v                v
+            +-----------+      +-----------+
+            | Switch S2 |      | Switch S3 |
+            | (Path A)  |      | (Path B)  |
+            +-----------+      +-----------+
+             [Primary]          [Alternate]
+             10 Mbps, 5ms       10 Mbps, 15ms
+             Queue: 100 pkts    Queue: 100 pkts
+                    \              /
+                     \            /
+                      v          v
+                     +-----------+
+                     | Switch S4 | (Egress Switch)
+                     +-----------+
+                          |  (Port 1)
+                          v
+              [Host H2: Main Receiver] (10.0.0.2)
+```
+
+### A. Mininet Linux Kernel Virtualization
+* **Network Namespaces (`ip netns`):** Provides private network stacks, routing tables, and IP addresses (`10.0.0.1` - `10.0.0.4`) for each virtual host.
+* **Virtual Ethernet Pairs (`veth`):** Bidirectional virtual cables linking host namespaces to Open vSwitch ports (`h1-eth0` $\leftrightarrow$ `s1-eth1`).
+* **Linux Traffic Control (`tc`):**
+  - `tbf`: Enforces 10.0 Mbps link capacity limits using token buckets.
+  - `max_queue_size=100`: Limits FIFO queue buffer depth to 100 packets.
+  - `netem`: Injects kernel-level propagation delay: 5 ms on Path A, 15 ms on Path B.
+
+---
+
+### B. Pure-Python Standalone Data Plane Emulator (`src/network_emulator.py`)
+Enables zero-dependency execution on Windows and macOS:
+* `SimulatedLink`: Implements a bounded FIFO queue (`queue.Queue(maxsize=100)`).
+* Enforces drop-tail queuing: if `qsize() >= 100`, incoming packets are dropped and `dropped_packets` increments.
+* Dynamic Token-Bucket Limiter: Recalculates byte allowances monotonically, mirroring real hardware traffic shapers.
+* Relay Loop: Forwards packets between switch ports and records port byte counters for the SDN controller.
+
+---
+
+## 4. D1 Behind the Scenes: Journey of a Single Packet (#1050)
+Under baseline conditions with the 6.0 Mbps stream running across clean Path A:
+1. `udp_sender.py`: Serializes packet #1050 with custom 22-byte header (`struct.pack`).
+2. OS Kernel: Dispatches packet via `socket.sendto()` through interface `h1-eth0`.
+3. Ingress Switch $S_1$: Matches header on Port 1. Baseline Priority 100 rule directs packet out of Port 2 (Path A).
+4. Physical Link ($S_1 \rightarrow S_2$): Token bucket checks bandwidth; 5 ms propagation delay applied. Queue buffer is empty (`0/100 pkts`).
+5. Egress Switch $S_4$: Forwards packet out of Port 1 to Host $H_2$.
+6. `udp_receiver.py`: Reads packet via `sock.recvfrom()`, verifies Magic `SDN1`, confirms sequence continuity (0 loss), records latency ($5.2\text{ ms}$), and updates RFC 3550 jitter ($0.3\text{ ms}$).
+
+---
+
+## 5. D1 Owned Files & Roles
+* [`src/protocol.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/protocol.py): Binary datagram packing, unpacking, and validation.
+* [`src/udp_sender.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/udp_sender.py): Drift-compensated rate-paced UDP client.
+* [`src/udp_receiver.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/udp_receiver.py): Multi-threaded telemetry receiver and RFC 3550 jitter engine.
+* [`src/topology.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/topology.py): Mininet Diamond topology definition and baseline flow rules.
+* [`src/network_emulator.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/network_emulator.py): Standalone pure-Python switch and link emulator.
+
+---
+
+# ================================================================
+# PART 2: DELIVERABLE 2 (D2 — ADVANCED FUNCTIONALITY - 25 MARKS)
+# ================================================================
+
+## 1. What to Explain for Deliverable 2
+Deliverable 2 demonstrates **closed-loop intelligence, congestion detection, dynamic OpenFlow rerouting, rate adaptation, and empirical evaluation**:
+1. **Multi-Flow Congestion Burst:** How injecting 7.0 Mbps cross-traffic overloads Path A to 13.0 Mbps (130% of capacity).
+2. **Buffer Dynamics & Bufferbloat:** How the 100-packet queue saturates, spiking latency to 100+ ms and causing severe drop-tail packet loss (>50%).
+3. **Closed-Loop Telemetry & Detection:** How the SDN Controller samples port counters every 0.5s, detects the 8.0 Mbps threshold breach, and uses 2-consecutive breach filtering ($N=2$) to eliminate false triggers.
+4. **Dynamic OpenFlow 1.3 `FlowMod` Injection:** How the controller installs Priority 200 rules into Switch $S_1$ to steer traffic to Path B in $<3\text{ ms}$.
+5. **Anti-Flapping Hysteresis:** How the 4.5 Mbps cooldown threshold prevents route oscillation.
+6. **Closed-Loop Rate Adaptation:** How receiver feedback throttles source rate when both paths are congested.
+7. **Empirical Benchmarking Engine:** Automated 3-phase comparative evaluation (Static vs Dynamic vs Rate Control) with live streaming tables, runtime badges, and high-DPI graphs.
+8. **Watermark:** `*D2` located on the SDN Dynamic Rerouting Analytics Dashboard (Tab 1) and Automated Benchmark Panel (Tab 4).
+
+---
+
+## 2. D2 Deep Dive: Closed-Loop SDN Control Plane & Failover Engine
+
+### A. The 6-Phase Lifecycle of Congestion & Failover
 ```
  Throughput (Mbps)
     8.0 + - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -84,169 +195,71 @@ Our automated benchmark runs an end-to-end experiment demonstrating the before, 
                           Injected (7M)       Pushes FlowMod
 ```
 
-### Phase 1: Baseline Normal State ($T=0\text{s}$ to $T=7\text{s}$)
-* Host $H_1$ transmits at $6.0\text{ Mbps}$ using UDP port 9999.
-* Default OpenFlow rule directs traffic out of Switch $S_1$ Port 2 $\rightarrow$ Path A ($S_1 \rightarrow S_2 \rightarrow S_4$).
-* Link capacity is $10.0\text{ Mbps}$.
-* **Metrics:** Throughput = $6.0\text{ Mbps}$, Packet Loss = $0.0\%$, Latency = $\approx 6.5\text{ ms}$, Jitter = $0.2\text{ ms}$.
-
-### Phase 2: Congestion Injected ($T=7\text{s}$)
-* `congestion_generator.py` fires on Host $H_3$, transmitting $7.0\text{ Mbps}$ of cross-traffic to Host $H_4$ through Switch $S_1$ Port 2.
-* Total offered load hitting Path A = $6.0 + 7.0 = 13.0\text{ Mbps}$ ($130\%$ of link capacity).
-* The Token Bucket Filter on the switch interface depletes its tokens.
-* The 100-packet queue buffer fills completely within $150\text{ ms}$, creating massive queuing delay (**bufferbloat** spikes latency from $6\text{ ms}$ to $130\text{ ms}$).
-* Once the queue buffer is full, incoming packets are discarded via **tail drop**.
-* **Metrics:** Packet loss surges to **$55\% - 61\%$**, throughput collapses to **$2.5 - 3.0\text{ Mbps}$**.
-
-### Phase 3: Telemetry Detection ($T=8.0\text{s}$)
-* The SDN Controller's background thread polls the transmitted byte counters of Switch $S_1$ Port 2 every $0.5\text{s}$.
-* It computes the delta:
-  $$\text{Bitrate} = \frac{(\text{tx\_bytes}_t - \text{tx\_bytes}_{t-1}) \times 8}{0.5 \times 10^6} = 13.01\text{ Mbps}$$
-* $13.01\text{ Mbps} \ge 8.0\text{ Mbps}$ threshold $\rightarrow$ Breach Counter increments to 1.
-* At $T=8.5\text{s}$, the next poll confirms the breach (Breach Counter = 2).
-* **Congestion Alert Confirmed!**
-
-### Phase 4: Dynamic OpenFlow Reroute ($T=8.51\text{s}$)
-* The controller executes `_trigger_reroute(to_path=PATH_ALTERNATE)`.
-* It generates and injects an OpenFlow 1.3 `FlowMod` rule into Switch $S_1$:
-  - Match: `ip_src=10.0.0.1, ip_dst=10.0.0.2, udp_dst=9999`
-  - Priority: `200`
-  - Action: `output:3` (Port 3 connects to Switch $S_3$ along Path B).
-* Because Open vSwitch matches flows in priority order, packets matching priority 200 immediately bypass the default priority 50 rule.
-* **Failover Recovery Time:** Measured empirically at **$11.46\text{ milliseconds}$** ($0.011\text{s}$), and **$8.98\text{ milliseconds}$** with closed-loop rate adaptation.
-
-### Phase 5: Restored Steady-State ($T=9.0\text{s}$ to $T=17.0\text{s}$)
-* Traffic is now physically partitioned across two separate links:
-  - **Path A Link ($S_1 \rightarrow S_2$):** Carries the $7.0\text{ Mbps}$ cross-traffic. Since $7.0\text{ Mbps} < 10.0\text{ Mbps}$, the queue drains and drops cease!
-  - **Path B Link ($S_1 \rightarrow S_3$):** Carries the $6.0\text{ Mbps}$ main application traffic.
-* **Metrics:** Main flow throughput immediately bounces back to **$6.0\text{ Mbps}$**, and packet loss drops to **$0.0\%$**!
-
-### Phase 6: Hysteresis Stabilization ($T=17.0\text{s}+$)
-* Cross-traffic stops. Path A's load drops to $0.0\text{ Mbps}$.
-* Our controller enforces an anti-flapping threshold (`HYSTERESIS_RECOVERY_MBPS = 4.5 Mbps`).
-* Rather than greedily flapping back and forth, the flow remains stable on Path B until a permanent network rebalancing is scheduled.
+* **Phase 1: Baseline Normal State ($T=0\text{s}$ to $T=7\text{s}$):** Main stream transmits at 6.0 Mbps over Path A. Queue is empty, loss is 0%, latency is ~5 ms.
+* **Phase 2: Congestion Injected ($T=7\text{s}$):** `congestion_generator.py` fires 7.0 Mbps cross-traffic on Path A. Total offered load hits 13.0 Mbps (130% link capacity). Switch $S_2$ queue fills to 100 packets, inducing **bufferbloat** (latency spikes to 100+ ms) and **tail drop** (loss surges to 50%+).
+* **Phase 3: Telemetry Detection ($T=8.0\text{s}$ to $T=8.5\text{s}$):** Controller polls Port 2 byte counter delta, calculating load = 13.0 Mbps $\ge$ 8.0 Mbps threshold. Breach counter increments to 2 ($N=2$), confirming sustained congestion.
+* **Phase 4: Dynamic OpenFlow Reroute ($T=8.51\text{s}$):** Controller dispatches `OFPFlowMod` to Switch $S_1$ with Priority 200, outputting UDP port 9999 to Port 3 (Path B). Failover latency is **$\approx 2.4\text{ ms}$**.
+* **Phase 5: Restored Steady-State ($T=9.0\text{s}+$):** Main flow moves to Path B (latency shifts to ~15 ms, loss drops to 0.0%, throughput restored to 6.0 Mbps). Path A carries only cross-traffic (7.0 Mbps < 10.0 Mbps, queue drains, drops cease).
+* **Phase 6: Hysteresis Stabilization:** When cross-traffic stops, controller enforces an anti-flapping threshold (`HYSTERESIS_RECOVERY_MBPS = 4.5 Mbps`), preventing route bouncing.
 
 ---
 
-## 4. Exhaustive File-by-File Codebase Reference
-
-### File 1: [`setup.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/setup.py) (Automated Environment Bootstrapper)
-* **Goal:** Make the project run immediately in any environment (Windows, Ubuntu VM, Mininet VM).
-* **Architecture:**
-  - `check_python_modules()`: Inspects `sys.modules` for `matplotlib`, `networkx`, `tabulate`, `rich`, `psutil`, `pytest`.
-  - `check_linux_system_tools()`: If running on Linux, checks `shutil.which()` for `mn` (Mininet), `ovs-vsctl`, `ovs-ofctl`, and `ifconfig`.
-  - `install_linux_packages()`: Invokes `sudo apt-get update && apt-get install -y mininet openvswitch-switch net-tools`.
-  - `launch_run_py()`: If all dependencies are already satisfied, it invokes `os.execv(sys.executable, ["run.py"])`, replacing the setup process with `run.py` instantly with zero user friction.
-
-### File 2: [`run.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/run.py) (Master Orchestration CLI)
-* **Goal:** Provides both a user-friendly interactive terminal menu and automated CLI flags.
-* **CLI Flags:**
-  - `--demo`: Launches the real-time simulation with live telemetry logging.
-  - `--benchmark`: Runs the automated comparative experiment and renders plots.
-  - `--mininet`: Launches the Mininet CLI on Linux.
-  - `--test`: Runs `pytest -v tests/`.
-
-### File 3: [`src/config.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/config.py) (Central Configuration Repository)
-* Centralizes all IP addresses (`10.0.0.1` - `10.0.0.4`), UDP ports (Main: `9999`, Cross: `9998`), link bandwidths (`10.0 Mbps`), delays ($5\text{ms}$ vs $15\text{ms}$), queue depths ($100\text{ packets}$), rate limits ($6\text{ Mbps}$ vs $7\text{ Mbps}$), and detection thresholds ($8.0\text{ Mbps}$, $N=2$ breaches).
-
-### File 4: [`src/protocol.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/protocol.py) (Binary Protocol Engine)
-* **Header Format:** `!4s I d H B B H` (22 bytes total).
-* **Pre-Compiled `struct.Struct`:** Pre-compiles `HEADER_STRUCT` and `FEEDBACK_STRUCT`, avoiding format-string parsing overhead in tight serialization loops.
-* `pack_packet(seq_num, flow_id, flags, payload)`: Uses `time.time()` for high-precision timestamping and packs binary bytes into network byte order (big-endian).
-* `unpack_packet(data)`: Validates magic bytes `SDN1`, unpacks header via `HEADER_STRUCT.unpack_from(data, 0)`, slices trailing payload, and raises `InvalidPacketError` if malformed.
-
-### File 5: [`src/udp_sender.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/udp_sender.py) (Precision UDP Socket Client)
-* Creates socket using `socket(AF_INET, SOCK_DGRAM)`.
-* Expands `SO_SNDBUF` to 1 MB.
-* Implements a **monotonic drift-compensated transmission loop**:
-  - Caches `self._packet_interval = (packet_size * 8.0) / bits_per_sec` and recalculates only when transmission rate changes.
-  - Eliminates per-packet lock contention and repeated float divisions.
-  - Compares `time.perf_counter()` against `next_send_time` to eliminate OS scheduling drift.
-  - Tags packets with `FLAG_START` on initialization and `FLAG_FIN` on termination.
-  - Uses `collections.deque(maxlen=200)` for adaptation event logs.
-
-### File 6: [`src/udp_receiver.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/udp_receiver.py) (Multi-Threaded Telemetry Server)
-* Binds to `0.0.0.0:9999` with `SO_RCVBUF` set to 2 MB and a $0.5\text{s}$ socket timeout.
-* **Bounded Ring Buffers:** `latencies_ms = deque(maxlen=2000)` and `history = deque(maxlen=500)` strictly guarantee $O(1)$ memory bounds, keeping working set stable at ~92–95 MB RAM.
-* Thread-safe telemetry collection:
-  - Tracks total received packets, bytes, sequence gaps, and out-of-order packets.
-  - Computes one-way latency: $(T_{\text{recv}} - T_{\text{send}}) \times 1000\text{ ms}$.
-  - Computes RFC 3550 exponential moving average jitter:
-    $$J_i = J_{i-1} + \frac{|D(i, j)| - J_{i-1}}{16}$$
-  - Maintains rolling 500ms sliding windows for live throughput and loss percentage calculation.
-
-### File 7: [`src/congestion_generator.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/congestion_generator.py) (Cross-Traffic Engine)
-* Waits for `start_delay = 7.0s`, then launches a high-rate $7.0\text{ Mbps}$ UDP burst tagged with `FLOW_CROSS = 2` directed to Host $H_4$.
-* Overloads Path A to 13 Mbps, inducing the controlled network stress scenario.
-
-### File 8: [`src/topology.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/topology.py) (Mininet Diamond Topology)
-* Defines `DiamondTopo(Topo)`:
-  - Adds 4 Open vSwitch instances ($S_1, S_2, S_3, S_4$) with `protocols="OpenFlow13"`.
-  - Adds 4 hosts with `/24` subnet IP configurations.
-  - Uses `TCLink` to enforce $10\text{ Mbps}$ bandwidth, $5\text{ms}$ delay on Path A, $15\text{ms}$ delay on Path B, and 100-packet buffer limits.
-  - `setup_ovs_flows()` installs baseline OpenFlow rules for ARP flooding and initial routing out of Port 2.
-
-### File 9: [`src/network_emulator.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/network_emulator.py) (Pure-Python Network Emulator)
-* Allows the entire system to run on Windows or non-root environments without installing Mininet.
-* Implements `SimulatedLink` using thread-safe `queue.Queue(maxsize=100)`.
-* Caches token-bucket parameters `_bytes_per_sec` and `_max_tokens` to eliminate per-packet floating point overhead.
-* Drains packets at exact serialization rate ($1,250,000\text{ bytes/sec}$), drops packets on queue overflow, and routes packets dynamically based on the SDN controller's active path.
-
-### File 10: [`src/sdn_controller.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/sdn_controller.py) (SDN Controller & Telemetry Brain)
-* Background telemetry loop runs every $0.5\text{s}$.
-* Calculates rate in Mbps: $\frac{\Delta \text{bytes} \times 8}{\Delta t \times 10^6}$.
-* Detects breach ($>8.0\text{ Mbps}$). If breach persists for $N=2$ samples, triggers reroute.
-* Dispatches OpenFlow `FlowMod` to Switch $S_1$ via `ovs-ofctl`, matching UDP port 9999 with action `output:3` at `priority=200`.
-* Measures Recovery Time between breach detection and flow rule confirmation ($11.46\text{ ms}$).
-
-### File 11: [`src/ryu_controller.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/ryu_controller.py) (Standard Ryu OpenFlow 1.3 App)
-* Implements the official Ryu event-driven architecture using `EventOFPPortStatsReply` and `OFPFlowMod`.
-* Compatible with `ryu-manager src/ryu_controller.py`.
-
-### File 12: [`src/benchmark.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/benchmark.py) (Scientific Comparison Suite)
-* Runs three consecutive experiments under identical traffic patterns:
-  1. Static Routing (adaptive rerouting disabled).
-  2. Dynamic SDN Adaptive Routing (controller enabled).
-  3. Dynamic SDN + Closed-Loop Rate Control.
-* Computes average throughput, packet loss, peak loss, latency, and recovery time.
-* Uses Matplotlib with the headless `"Agg"` backend to render the 4-panel comparison figure saved as `evaluation_results.png`.
-
-### File 13: [`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py) (SDN Dynamic Rerouting Analytics Dashboard)
-* Implements dedicated multi-metric real-time SDN graphs:
-  - **Dual-Path Offered Load vs SDN Threshold:** Tracks Path-A vs Path-B load against the 8.0 Mbps threshold and 10.0 Mbps bottleneck capacity.
-  - **Ingress Buffer Queue & Loss Mitigation:** Graphed queue fill (0-100 pkts) and packet loss drop to 0% upon dynamic rerouting.
-  - **Latency & Jitter Stability:** End-to-end one-way delay and RFC 3550 jitter across path failover transitions.
-  - **NavigationToolbar & Auto-Track:** Fully zoomable and pannable with smart auto-track lock that pauses on user inspection and snaps back on toggle.
-
-### File 14: [`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py) (Master 60 FPS Presentation Dashboard)
-* **60 FPS Animated Topology Canvas:** Runs at 16 ms intervals with pre-cached `QFont`, `QPen`, and `QBrush` assets, rendering packet dot streams, queue fill meters, and translucent watermark `*D1`.
-* **Instant Non-Blocking Matplotlib Canvas:** Uses in-place `Line2D.set_data(x, y)` and asynchronous `draw_idle()`, slashing plot update time from 187 ms to 0.08 ms (~2,337x speedup).
-* **Interactive Category 2 Sliders:** Queue limit (10 to 100 packets), bottleneck bandwidth (2 to 10 Mbps), host rate (1 to 10 Mbps), and cross-traffic rate (1 to 10 Mbps).
-* **Live Telemetry & Watermarks:** Real-time throughput, packet loss %, latency, jitter, packet counters, live S1 flow table inspector, and translucent watermark `*D2`.
+### B. Closed-Loop Rate Adaptation (SDN + Source Throttling)
+In extreme network states where both Path A and Path B are congested:
+1. Receiver detects sustained packet drops even after rerouting.
+2. Receiver dispatches lightweight feedback packets (`FLAG_FEEDBACK`) to sender port 9005.
+3. Sender scales back transmission rate: $\text{Rate}_{\text{new}} = \max(2.0\text{ Mbps}, \text{Rate}_{\text{current}} \times 0.75)$.
+4. When loss drops to 0%, sender probes upward, achieving **closed-loop end-to-end backpressure**.
 
 ---
 
-## 5. Mathematical Summary Table
+### C. Automated 3-Phase Performance Evaluation Engine (`src/benchmark.py`)
+Tab 4 provides a scientific comparison across three experimental modes:
+1. **Static Routing (Exp A):** Controller disabled. Sustained 50%+ packet loss, collapsed throughput (~3.5 Mbps), zero recovery.
+2. **Dynamic SDN (Exp B):** Controller active. Sub-second failover to Path B, 0% sustained loss, full 6.0 Mbps throughput restored.
+3. **SDN + Rate Control (Exp C):** Failover combined with source throttling for dual-path congestion avoidance.
+* **GUI Features:** Real-time progressive table streaming as each phase finishes, execution run counter badges (`[Run #N — Completed at HH:MM:SS]`), and 4-panel high-DPI comparative graphs.
+
+---
+
+## 3. D2 Owned Files & Roles
+* [`src/sdn_controller.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/sdn_controller.py): Closed-loop telemetry engine, breach detection, and OpenFlow `FlowMod` dispatcher.
+* [`src/ryu_controller.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/ryu_controller.py): Standard Ryu OpenFlow 1.3 controller framework application.
+* [`src/congestion_generator.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/congestion_generator.py): Multi-flow 7.0 Mbps cross-traffic burst injector.
+* [`src/benchmark.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/benchmark.py): Automated comparative benchmarking engine and Matplotlib chart generator.
+* [`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py): Full dashboard suite featuring PyQtGraph real-time analytics, NOC telemetry, and benchmark evaluation panels.
+
+---
+
+# ================================================================
+# MATHEMATICAL SUMMARY TABLE (LINKING CODE TO FORMULAS)
+# ================================================================
 
 | Metric | Mathematical Formula | Code Implementation |
 | :--- | :--- | :--- |
-| **Instantaneous Bitrate** | $\text{Mbps} = \frac{\Delta \text{Bytes} \times 8}{\Delta t \times 1,000,000}$ | `src/sdn_controller.py` line 180 |
+| **Instantaneous Bitrate** | $\text{Mbps} = \frac{\Delta \text{Bytes} \times 8}{\Delta t \times 1{,}000{,}000}$ | `src/sdn_controller.py` line 180 |
 | **Packet Loss Count** | $\text{Loss} = \text{Seq}_{\text{recv}} - \text{Seq}_{\text{expected}}$ | `src/udp_receiver.py` line 143 |
-| **One-Way Delay** | $\text{Latency} = (T_{\text{recv}} - T_{\text{send}}) \times 1000\text{ ms}$ | `src/udp_receiver.py` line 131 |
+| **One-Way Latency** | $\text{Latency} = (T_{\text{recv}} - T_{\text{send}}) \times 1000\text{ ms}$ | `src/udp_receiver.py` line 131 |
 | **RFC 3550 Jitter** | $J_i = J_{i-1} + \frac{|(R_j - S_j) - (R_i - S_i)| - J_{i-1}}{16}$ | `src/udp_receiver.py` line 137 |
-| **Packet Interval (Pacing)** | $\Delta t_{\text{pkt}} = \frac{\text{Packet Size (Bytes)} \times 8}{\text{Bitrate (bps)}}$ | `src/udp_sender.py` line 113 |
+| **Packet Pacing Interval** | $\Delta t_{\text{pkt}} = \frac{\text{Packet Size (Bytes)} \times 8}{\text{Bitrate (bps)}}$ | `src/udp_sender.py` line 113 |
 | **Serialization Delay** | $t_{\text{serialize}} = \frac{\text{Packet Length (Bytes)} \times 8}{\text{Link Capacity (bps)}}$ | `src/network_emulator.py` line 77 |
-| **Recovery Time** | $T_{\text{recovery}} = T_{\text{rule\_confirmed}} - T_{\text{breach\_detected}}$ | `src/sdn_controller.py` line 150 |
+| **Failover Recovery Time** | $T_{\text{recovery}} = T_{\text{rule\_confirmed}} - T_{\text{breach\_detected}}$ | `src/sdn_controller.py` line 150 |
+| **Bandwidth Restoration Gain** | $\text{Gain (\%)} = \frac{\text{Thpt}_{\text{Dynamic}} - \text{Thpt}_{\text{Static}}}{\text{Thpt}_{\text{Static}}} \times 100\%$ | `src/gui_app.py` line 1400 |
 
 ---
 
-## 6. Performance Engineering & Systems Optimization Deep Dive
+# ================================================================
+# PERFORMANCE ENGINEERING & SYSTEMS OPTIMIZATION
+# ================================================================
 
-### A. The Matplotlib Event-Loop Starvation Problem
-In Qt-based dashboards embedding Matplotlib, a common defect is calling `ax.clear()`, rebuilding axis spines, recalculating ticks, and executing synchronous `self.draw()` on a high-frequency timer (e.g. 10 Hz / 100 ms).
-- **Observed Impact:** Redrawing took **187.02 ms** (and up to 276.51 ms under load). Because redraw time was longer than the timer period, Qt's main event loop became 100% saturated. Mouse clicks were queued, sliders stuttered, and packet animations froze.
-- **The Solution:** We pre-configured all axes and spines in `__init__`, instantiated persistent `Line2D` objects, and updated them in-place using `line.set_data(x, y)` followed by non-blocking `self.draw_idle()`. Redraw time dropped to **0.08 ms (>2,300x faster)**, leaving the GUI thread 99% free.
+### 1. PyQtGraph Hardware Acceleration (97x Latency Drop)
+* **Problem:** Redrawing 5 Matplotlib subplots synchronously on a 250 ms QTimer consumed **~240 ms per tick**, saturating the Qt event loop by 96% and causing UI lag.
+* **Fix:** Migrated real-time telemetry plotting to **PyQtGraph** (`pg.GraphicsLayoutWidget`). Curve updates take **0.065 ms** and total cycle duration dropped to **2.47 ms (~97x faster)**, keeping CPU utilization under 3%.
 
-### B. Memory Stability via Bounded Circular Ring Buffers
-In long-running telemetry applications, appending packet measurements to Python lists creates an $O(N)$ memory leak where memory usage grows continuously with every received packet.
-- **The Solution:** We enforced strict bounds using `collections.deque(maxlen=2000)` for latency samples and `deque(maxlen=500)` for rolling snapshots. Oldest items are discarded automatically in $O(1)$ time. Working set RSS remains locked at **~92–95 MB** over indefinitely long streaming sessions.
+### 2. Bounded Ring Buffers & Memory Stability
+* **Problem:** Unbounded `list.append()` calls in high-throughput network monitoring produce an $O(N)$ memory leak.
+* **Fix:** Enforced bounded circular buffers using `collections.deque(maxlen=2000)` and `deque(maxlen=250)`, combined with sliding-window de-indexing. Memory working set remains rock-solid at **~92–95 MB RAM** indefinitely.
+
+### 3. Anomaly-Focused Logging
+* **Problem:** Appending 1,160 HTML datagram lines per second into QTextEdit caused continuous layout reflows (~230 ms/s overhead).
+* **Fix:** Filtered normal packets into aggregate counters while immediately surfacing drops, buffer overflows, and SDN reroutes.

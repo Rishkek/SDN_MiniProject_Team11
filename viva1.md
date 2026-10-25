@@ -1,14 +1,18 @@
 # Viva Defense & Demonstration Guide 1: Transport Layer & Socket Programming
 
 **Complements:** [`study1.md`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/study1.md)  
-**Topic Focus:** Low-Level UDP Sockets, 22-Byte Binary Protocol, Precise Rate Pacing, Receiver Telemetry, and Cross-Traffic Injection  
+**Topic Focus:** Low-Level UDP Sockets, 22-Byte Binary Protocol, Precise Rate Pacing, Receiver Telemetry, Multi-Flow Traffic, and Rate Adaptation  
 **Relevant Code Files:** `src/protocol.py`, `src/udp_sender.py`, `src/udp_receiver.py`, `src/congestion_generator.py`
 
 ---
 
-## 1. Written Instructions: How to Demonstrate This Subsystem in the App
+# ================================================================
+# PART 1: DELIVERABLE 1 (D1 — FOUNDATION DEMO & VIVA - 15 MARKS)
+# ================================================================
 
-When it is your turn to present or defend the Transport Layer and Socket Programming subsystem, follow this exact step-by-step procedure:
+## 1. D1 Step-by-Step Demonstration Walkthrough in the App
+
+Follow these exact steps when demonstrating the **Deliverable 1 Foundation**:
 
 ### Step 1: Launch the Application
 Open PowerShell or Terminal and start the GUI dashboard:
@@ -19,102 +23,141 @@ python run.py
 
 ---
 
-### Step 2: Show the Category 2 Stream Controls & Set Sending Rate
-1. Look at the right-hand panel of **Tab 0 ("🌐 Live Visual Topology & Stream Control")**.
-2. Find the **"Main Send Rate"** slider under *Network Parameters & Stream Controls*.
-3. Drag the slider to **`6.0 Mbps`** (the baseline mission-critical sending rate).
-4. **What to say aloud:**
+### Step 2: Configure Sending Rate & Review Socket Controls
+1. On **Tab 0 ("🌐 Live Visual Topology & Stream Control")**, look at the right-hand panel: **"Network Parameters & Stream Controls"**.
+2. Find the **"Main Send Rate"** slider and set it to **`6.0 Mbps`**.
+3. **What to say aloud:**
    > *"Here in our application layer controls, we have implemented a high-precision UDP sender. Notice that we are not using any high-level HTTP wrappers or requests libraries. We are programming directly against low-level BSD sockets using Python's native `socket` library. I am configuring our main traffic stream to transmit at exactly 6.0 Mbps."*
 
 ---
 
-### Step 3: Start the Main UDP Stream
+### Step 3: Start the Main UDP Stream & Verify Telemetry
 1. Click the green button: **`▶ Start Main UDP Stream`**.
 2. Notice the button turns pink and changes to **`⏹ Stop Main UDP Stream`**.
 3. Point your finger to the bottom right: **"Category 2: Real-Time Socket Telemetry"**:
-   - **Live Throughput:** Rises smoothly to **`5.9 – 6.0 Mbps`**.
+   - **Live Throughput:** Locks smoothly at **`5.9 – 6.0 Mbps`**.
    - **Goodput:** Displays **`~5.8 Mbps`** (raw payload rate excluding protocol headers).
-   - **One-Way Latency:** Reads **`~5.0 ms`** (the physical propagation delay of Path A).
-   - **RFC 3550 Jitter:** Shows a tight, stable value under **`0.5 ms`**.
-   - **Packet Counters:** The `Recv` counter increments rapidly by hundreds of packets every second with `Lost: 0`.
+   - **One-Way Latency:** Reads **`~5.0 ms`** (the physical propagation delay of clean Path A).
+   - **RFC 3550 Jitter:** Displays a stable value under **`0.5 ms`**.
+   - **Packet Counters:** `Recv` counter increments rapidly by hundreds of packets/sec with `Lost: 0`.
 4. Point to the bottom plot: **"📈 Live UDP Throughput & Packet Loss Telemetry"**:
    - The green throughput curve locks stably at 6.0 Mbps.
-   - The red packet loss line stays flat at 0%.
+   - The red packet loss line stays flat at 0.0%.
 5. **What to say aloud:**
    > *"As soon as I start the stream, our multi-threaded UDP receiver on port 9999 begins catching datagrams. Notice how our throughput immediately locks at 6.0 Mbps with zero packet loss. Our receiver is calculating one-way transit latency by reading the 64-bit microsecond timestamp stamped into every packet header, showing approximately 5 milliseconds."*
 
 ---
 
-### Step 4: Show the Live Datagram Stream in the Terminal
-1. Click on **Tab 2: "📟 Live Mininet Packet Stream Terminal"** (or click the orange **"🖥 Live OS Terminal"** button at the top header).
-2. Show the real-time datagram logs streaming across the screen:
+### Step 4: Show Datagram Inspection in the Packet Stream Terminal
+1. Switch to **Tab 2: "📟 Live Mininet Packet Stream Terminal"** (or click the orange **"🖥 Live OS Terminal"** button at the top header).
+2. Show the real-time datagram logs:
    ```
    [12:15:30.142] [MAIN # 1045] Path-A | Size: 1024B | Q:  0/100 | FORWARDED
    [12:15:30.143] [MAIN # 1046] Path-A | Size: 1024B | Q:  0/100 | FORWARDED
    ```
 3. Highlight the fields: Sequence Number (`#1045`), Packet Size (`1024B`), and Status (`FORWARDED`).
-4. **What to say aloud:**
+4. Point to the **translucent watermark `*D1`** in the bottom-right corner of the terminal and topology canvas.
+5. **What to say aloud:**
    > *"Here in our packet terminal, you can inspect each individual datagram as it is serialized and dispatched. Every single packet is 1024 bytes, consisting of our custom 22-byte binary header followed by 1002 bytes of payload. We can see the sequence numbers incrementing with perfect continuity."*
 
 ---
 
-### Step 5: Demonstrate Closed-Loop Rate Adaptation (Optional Bonus Feature)
-1. Switch back to **Tab 0**.
-2. Click the button: **`UDP Rate Adaptation: OFF`** to turn it **`ON`**.
-3. **What to say aloud:**
-   > *"While standard UDP has no flow control, we also engineered an optional closed-loop rate adaptation mechanism. The receiver computes sliding-window loss and transmits periodic feedback datagrams (`FLAG_FEEDBACK = 0x10`) back to the sender on port 9005. If packet loss exceeds 5%, the sender performs a multiplicative rate decrease (-30%) to relieve pressure on the network."*
+## 2. Core D1 Viva Defense Questions & Answers
 
----
-
-## 2. Core Concepts You Must Master
-
-1. **Why UDP over TCP:**
-   - TCP has built-in congestion control (AIMD/Cubic). Senders back off automatically when packets drop.
-   - UDP is connectionless and unthrottled. It will blindly flood a link, causing severe queue overflows. Real-world applications like live video, VoIP, and telemetry require UDP because retransmissions cause unacceptable lag. This is why an external SDN controller is necessary.
-2. **The 22-Byte Protocol Header:**
-   - Format: `!4s I d H B B H` (Magic `SDN1`, 32-bit Seq Num, 64-bit Timestamp, 16-bit Flow ID, 8-bit Flags, 8-bit Reserved, 16-bit Payload Length).
-   - Pre-compiled with `struct.Struct` for $O(1)$ packing speed. Big-Endian network byte order (`!`).
-3. **Drift-Compensated Pacing:**
-   - Interval between packets = $(\text{Packet Size} \times 8) / \text{Target Rate}$.
-   - Monotonic timer (`time.perf_counter()`) prevents cumulative clock drift caused by OS scheduler sleep quantization.
-4. **RFC 3550 Inter-Arrival Jitter:**
-   - Difference in transit times: $D(i, j) = |(R_j - S_j) - (R_i - S_i)|$.
-   - Smoothed with low-pass filter: $J = J + \frac{D(i, j) - J}{16}$.
-
----
-
-## 3. Top Expected Viva Questions & Winning Answers
-
-### Q1: Why did you design a custom binary protocol instead of sending JSON or plain text?
+### Q1: Why did you choose UDP instead of TCP for this project?
 **Answer:**
-> *"Sending JSON or plain text over UDP is inefficient for high-speed network telemetry. JSON requires string encoding, delimiters, and parsing on every packet, introducing significant CPU overhead and ballooning header size to over 150–200 bytes. Our custom binary protocol is exactly 22 bytes. Using Python's pre-compiled `struct.Struct`, packing and unpacking is an $O(1)$ memory copy operation that runs in microseconds, preserving bandwidth and maximizing throughput."*
+* TCP has built-in congestion control (AIMD, Reno, Cubic) that automatically throttles its congestion window (`cwnd`) when drops occur.
+* UDP has **zero built-in congestion control, zero flow control, and zero retransmissions**. A UDP sender will blast packets blindly regardless of whether bottleneck queues are overflowing.
+* Real-time applications (VoIP, video streaming, telemetry) require UDP because they cannot tolerate TCP retransmission delays. This makes UDP the ideal, mandatory protocol for demonstrating **Software-Defined Networking (SDN) dynamic traffic rerouting**: because endpoints cannot self-heal congestion, the network itself must step in.
 
----
-
-### Q2: How does your receiver calculate packet loss if UDP has no acknowledgments (ACKs)?
+### Q2: Explain the structure of your custom 22-byte binary protocol.
 **Answer:**
-> *"Because UDP has no ACKs, the receiver relies on the 32-bit Sequence Number embedded in our custom header. The sender increments this sequence number monotonically on every packet (0, 1, 2, 3...). The receiver tracks the expected sequence number. If packet #100 arrives and the next packet is #105, the receiver immediately registers that 4 packets were lost in the network. The loss percentage is calculated over a rolling 500 ms window as $\frac{\text{Lost}}{\text{Received} + \text{Lost}} \times 100\%$."*
+We pack a compact C-style binary header using `struct.Struct("!4sIdHBBH")`:
+1. `Magic (4B - b"SDN1")`: Validates datagram integrity and drops stray packets.
+2. `Sequence Number (4B - uint32)`: Tracks packet order and enables sequence-based drop detection.
+3. `Timestamp (8B - double)`: Records microsecond send time for one-way latency calculation.
+4. `Flow ID (2B - uint16)`: Differentiates Flow 1 (Main) from Flow 2 (Cross-Traffic).
+5. `Flags (1B)`: Signals `START (0x02)`, `DATA (0x01)`, `FIN (0x04)`, `FEEDBACK (0x10)`.
+6. `Reserved (1B)`: 32-bit CPU memory alignment padding.
+7. `Payload Length (2B)`: Length of trailing payload (1002 bytes $\rightarrow$ total 1024B packet).
+Using network byte order (`!`) guarantees interoperability across Little-Endian and Big-Endian architectures.
 
----
-
-### Q3: How do you measure one-way latency, and how do you handle clock synchronization?
+### Q3: How do you prevent timer drift when pacing UDP packets at 6.0 Mbps?
 **Answer:**
-> *"At the instant before `socket.sendto()` is called, the sender records the epoch timestamp in microseconds using `time.time()` and packs it into the 8-byte double field of the header. Upon arrival, the receiver records arrival time and subtracts: $\text{Latency} = (T_{\text{recv}} - T_{\text{send}}) \times 1000\text{ ms}$. In a distributed physical setup, clocks are synchronized using PTP (Precision Time Protocol) or NTP. In our local Mininet emulation, both hosts share the same underlying system hardware clock, providing microsecond-level accuracy without clock skew."*
+Standard `time.sleep()` drifts because OS process schedulers sleep slightly too long on each cycle. We implement **monotonic drift compensation** using `time.perf_counter()`:
+$$\Delta t_{\text{pkt}} = \frac{\text{Packet Size (Bytes)} \times 8}{\text{Bitrate (bps)}} = \frac{1024 \times 8}{6{,}000{,}000} \approx 1.365\text{ ms}$$
+On each packet, we compute `sleep_duration = next_send_time - time.perf_counter()`. If the OS slept too long on the previous packet, `sleep_duration` automatically shrinks on the next iteration, canceling out cumulative scheduling delay.
 
----
-
-### Q4: Why did you tune the socket buffers using `SO_SNDBUF` and `SO_RCVBUF`?
+### Q4: How is RFC 3550 Inter-Arrival Jitter calculated?
 **Answer:**
-> *"Default OS socket buffers can be as small as 64 KB. At high transmission rates (6 to 13 Mbps), an OS thread context switch can cause a temporary delay in reading the socket. If the socket buffer is only 64 KB, it fills up in under 40 milliseconds, causing the OS kernel to drop packets locally before they ever touch the network. We tuned `SO_SNDBUF` to 1 MB and `SO_RCVBUF` to 2 MB, guaranteeing that all observed packet drops are true physical drops caused by network queue bottleneck saturation, not OS buffer starvation."*
+For consecutive packets $i$ and $j$, the difference in transit times is $D(i, j) = |(R_j - S_j) - (R_i - S_i)|$.  
+The smoothed jitter estimate is updated using an exponential moving average low-pass filter ($\alpha = 1/16$):
+$$J_i = J_{i-1} + \frac{D(i, j) - J_{i-1}}{16}$$
 
 ---
 
-## 4. Examiner Trap Questions ("Gotchas") & How to Defend Them
+# ================================================================
+# PART 2: DELIVERABLE 2 (D2 — ADVANCED DEMO & VIVA - 25 MARKS)
+# ================================================================
 
-### Trap 1: "Why don't you use `time.sleep()` directly to pace packets?"
-**Your Defense:**
-> *"Calling `time.sleep()` directly causes cumulative timing drift. On Windows and Linux, `time.sleep()` has a minimum scheduling granularity of 1 to 15 milliseconds. If our target packet interval is 1.36 milliseconds, sleeping for 2 milliseconds on each packet would throttle our transmission to under 4 Mbps instead of 6 Mbps. We use monotonic drift compensation with `time.perf_counter()`, where any excess sleep on packet $N$ is deducted from the target wake time of packet $N+1$, maintaining an exact 6.0 Mbps average."*
+## 1. D2 Step-by-Step Demonstration Walkthrough in the App
 
-### Trap 2: "If UDP is unreliable, how do you know your telemetry feedback datagrams aren't lost?"
-**Your Defense:**
-> *"Rate-adaptation feedback datagrams are transmitted periodically every 500 milliseconds. Because network conditions change continuously, feedback is treated as a continuous stream of state updates rather than a transactional command. Even if a single feedback packet is dropped, the subsequent snapshot arrives 500 milliseconds later. This design avoids the head-of-line blocking that TCP ACK retransmissions would introduce."*
+Follow these exact steps when demonstrating the **Deliverable 2 Advanced Functionality**:
+
+### Step 1: Inject Congestion Burst and Observe Transport-Layer Impact
+1. Ensure the Main UDP Stream is running at 6.0 Mbps on clean Path A.
+2. Click the orange button: **`⚡ Inject Congestion (7M Burst on Path A)`**.
+3. Point your finger to **"Category 2: Real-Time Socket Telemetry"**:
+   - Watch **Overall Loss Rate** jump from `0.0%` to **`35% – 55%`**!
+   - Watch **One-Way Latency** surge from `5.0 ms` up to **`90 – 120 ms`** due to bufferbloat in Switch $S_2$'s queue!
+   - Watch **Throughput** drop from `6.0 Mbps` down to **`2.5 – 3.5 Mbps`**.
+4. **What to say aloud:**
+   > *"When I inject 7.0 Mbps of cross-traffic, total offered load hits 13.0 Mbps on our 10.0 Mbps bottleneck link. Because UDP has no built-in backpressure, the queue buffer saturates and drops excess packets. Notice our throughput collapses and latency spikes from 5 ms to over 100 ms due to severe bufferbloat."*
+
+---
+
+### Step 2: Observe Dynamic SDN Failover at the Transport Layer
+1. Watch the dashboard as the SDN controller executes a dynamic reroute:
+   - Point to the active path indicator switching from **`Path-A`** to **`Path-B`**.
+   - Point to **One-Way Latency** shifting from `100+ ms` to **`~15.0 ms`** (reflecting Path B's physical distance).
+   - Point to **Packet Loss** immediately dropping from `50%+` back to **`0.0%`**.
+   - Point to **Throughput** bouncing back to full **`6.0 Mbps`**.
+2. **What to say aloud:**
+   > *"Notice how the receiver immediately detects the route change. As soon as traffic shifts to clean Path B, packet loss drops from 50% back to zero and throughput is fully restored. The slight increase in latency from 5 ms to 15 ms confirms our packets are physically traveling along Path B."*
+
+---
+
+### Step 3: Demonstrate Closed-Loop Rate Adaptation (SDN + Backpressure)
+1. On the right-hand panel, find the checkbox: **`Enable Closed-Loop Rate Adaptation`** and check it.
+2. Inject a prolonged congestion burst.
+3. Show the evaluator how the receiver detects sustained loss and sends a `FLAG_FEEDBACK` packet back to sender port 9005.
+4. Point to the sender adapting:
+   - Main Send Rate automatically steps down from `6.0 Mbps` to `4.5 Mbps`, then to `3.5 Mbps`.
+   - Once congestion clears, the rate probes back up toward `6.0 Mbps`.
+5. Point to the **translucent watermark `*D2`** in the bottom-right corner of Tab 1 and Tab 4.
+6. **What to say aloud:**
+   > *"Under Deliverable 2, we have implemented Closed-Loop Rate Adaptation. When both paths experience congestion, our receiver sends feedback datagrams back to the sender on port 9005. The sender throttles its transmission rate to match available bottleneck capacity, demonstrating multi-layer transport and SDN coordination."*
+
+---
+
+## 2. Core D2 Viva Defense Questions & Answers
+
+### Q5: How is multi-flow traffic generated and differentiated in your sockets?
+**Answer:**
+We implement two concurrent traffic flows:
+- **Flow 1 (`FLOW_MAIN`):** 6.0 Mbps high-priority stream from $H_1$ to $H_2$ on port 9999.
+- **Flow 2 (`FLOW_CROSS`):** 7.0 Mbps cross-traffic burst from $H_3$ to $H_4$ on port 9998, instantiated via `src/congestion_generator.py`.
+Both flows pass through ingress port 9000. The 2-byte `Flow ID` field in our binary header allows switches and receivers to demultiplex and account for each flow independently.
+
+### Q6: What is bufferbloat, and how does your telemetry detect it?
+**Answer:**
+Bufferbloat occurs when bottleneck switch buffers are oversized and remain persistently full during traffic surges. Packets sit in the queue waiting to be drained, adding excessive delay.
+Our receiver detects bufferbloat by comparing the packet send timestamp against arrival time: under normal conditions latency is 5 ms (propagation delay), but under 13 Mbps congestion latency spikes to 90–120 ms because packets spend ~100 ms queuing inside the switch buffer before transmission.
+
+### Q7: How does your Closed-Loop Rate Adaptation feedback mechanism work?
+**Answer:**
+When Rate Adaptation is enabled:
+1. The receiver detects window packet loss exceeding 5.0%.
+2. It constructs a 16-byte binary feedback packet with flag `FLAG_FEEDBACK (0x10)` containing the current loss rate and observed throughput.
+3. The feedback packet is transmitted to the sender on feedback port 9005.
+4. The sender scales back its rate ($\text{Rate} \times 0.75$) down to a safety floor of 2.0 Mbps, mitigating buffer overflow until the network stabilizes.

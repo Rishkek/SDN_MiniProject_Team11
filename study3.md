@@ -1,60 +1,90 @@
 # Study Guide 3: SDN Control Plane, Closed-Loop Telemetry & Dynamic OpenFlow Rerouting
 
-## Subsystem 3: SDN Control Plane, Telemetry & Performance Evaluation
-**Component Focus:** OpenFlow 1.3 Controller Architecture, Continuous Telemetry Polling, Congestion Detection, Hysteresis, Dynamic FlowMod Rerouting, and Automated Benchmarking  
+**Component Focus:** OpenFlow 1.3 Controller Architecture, Continuous Telemetry Polling, Congestion Detection, Hysteresis, Dynamic FlowMod Rerouting, and Automated Performance Benchmarking  
 **Owned Project Files:**
 - [`src/sdn_controller.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/sdn_controller.py) — Core SDN controller, telemetry engine, hysteresis state machine, and flow table manager
 - [`src/ryu_controller.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/ryu_controller.py) — Standard Ryu OpenFlow 1.3 framework application for Mininet environments
-- [`src/benchmark.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/benchmark.py) — Automated comparative evaluation engine (Static vs Adaptive Routing)
-- [`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py) (SDN Analytics Dashboard) — Full-height 3-panel dynamic rerouting dashboard, dual-path load graphs, and flow table inspector
+- [`src/benchmark.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/benchmark.py) — Automated comparative evaluation engine (Static vs Adaptive Routing vs Rate Control)
+- [`src/gui_app.py`](file:///c:/Users/Lenovo/Desktop/CN_project_congestion%20and%20traffic%20rerouting/src/gui_app.py) (SDN Analytics Dashboard & Benchmark Dashboard) — Dual-path load graphs, flow table inspector, and watermark `*D2`
 
 ---
 
-## 1. What This Subsystem Does (Plain English Overview)
+# ================================================================
+# PART 1: DELIVERABLE 1 (D1 — FOUNDATION - 15 MARKS)
+# ================================================================
 
-If Subsystem 1 creates the cars (UDP traffic) and Subsystem 2 builds the roads and bridges (switches and links), **Subsystem 3 is the central air traffic control tower of the entire network**.
-
-In traditional computer networks, switches are "dumb" isolated devices. When a link gets jammed, a traditional switch simply shrugs its shoulders and throws packets in the trash. It has no idea that right next to it, an empty backup road is sitting completely unused.
-
-Subsystem 3 solves this problem through **Software-Defined Networking (SDN)**:
-1. **The Watchful Eye (Telemetry Poller):** Acts like a camera perched above the network, constantly checking how many bytes pass through every switch port every 0.5 seconds.
-2. **The Congestion Detector:** Calculates live traffic speed in Megabits per second. If the primary road (Path A) gets crammed above its 8.0 Mbps safety threshold (80% of link capacity) for two consecutive checks, the controller immediately sounds a congestion alarm.
-3. **The Instant Traffic Diverter (OpenFlow FlowMod):** Instead of waiting for a human operator, the controller pushes an instant digital instruction to Ingress Switch $S_1$ in less than 3 milliseconds: *"Divert the main UDP stream away from congested Path A and onto clean Path B immediately!"*
-4. **Anti-Oscillation Stability (Hysteresis):** Prevents route "flapping" (bouncing back and forth uncontrollably). The controller will not switch traffic back to Path A until its traffic has cooled down well below 4.5 Mbps.
-5. **The Comparative Auditor (Benchmark Suite):** Runs scientific experiments comparing dumb static routing against smart SDN adaptive routing, proving that dynamic rerouting slashes packet loss from 55% down to 0% and restores full network throughput.
+## 1. What to Explain for Deliverable 1
+In Deliverable 1, your role is to explain **how the SDN Control Plane decouples network intelligence from switch hardware**:
+1. The difference between the Control Plane (intelligence) and the Data Plane (forwarding).
+2. How the OpenFlow 1.3 protocol defines communications between switches and the controller.
+3. How Switch $S_1$'s initial flow table is configured with default baseline rules (Priority 100 directing traffic to Path A).
+4. How the controller queries 64-bit hardware port byte counters using `OFPPortStatsRequest`.
+5. Why traditional routing protocols like OSPF and ECMP are fundamentally incapable of preventing congestion in this scenario.
 
 ---
 
-## 2. Behind the Scenes: How the Technology Works Step-by-Step
+## 2. D1 Behind the Scenes: Control Plane Architecture Step-by-Step
 
 ### A. Control Plane vs. Data Plane Decoupling
-The foundational principle of Software-Defined Networking is the strict separation between the **Data Plane** and the **Control Plane**:
-* **Data Plane (Switches):** Responsible only for the raw muscle work—moving packets from an input port to an output port according to a lookup table.
-* **Control Plane (SDN Controller):** Responsible for the brain work—deciding *which* paths traffic should take across the entire global topology.
-
-By removing the intelligence from individual switches and placing it into a centralized software controller, we can program the behavior of the entire network using high-level Python code.
+In traditional networking, switches are isolated, distributed boxes running complex embedded software. In **Software-Defined Networking (SDN)**:
+* **Data Plane (Switches):** Performs simple, high-speed packet forwarding based on match-action rules stored in flow tables.
+* **Control Plane (Controller):** Operates as a centralized software brain with global visibility of the entire network topology, making dynamic forwarding decisions using high-level Python code.
 
 ---
 
-### B. Why Traditional Routing Protocols Fail in This Scenario
+### B. Baseline OpenFlow 1.3 Flow Rules
+When the network starts up, the controller installs baseline forwarding rules into Switch $S_1$:
+```
+Table 0:
+- Priority 100: Match in_port=1 (H1) -> Action: Output to Port 2 (Path A)
+- Priority 0: Match * (All other traffic) -> Action: Normal / Drop
+```
+Under normal baseline conditions (6.0 Mbps transmission), traffic flows smoothly over Path A with low 5 ms latency and zero packet loss.
 
-During a technical evaluation, one of the most critical theoretical questions is: *Why couldn't traditional routing protocols like OSPF or ECMP solve this congestion?*
+---
+
+### C. Hardware Port Statistics Accounting
+The controller continuously communicates with OpenFlow switches using asynchronous request-reply messages:
+1. The controller sends an `OFPPortStatsRequest` targeting Switch $S_1$.
+2. The switch returns an `OFPPortStatsReply` containing cumulative 64-bit counters:
+   - `tx_bytes`: Total bytes transmitted out of each port.
+   - `rx_bytes`: Total bytes received on each port.
+   - `tx_dropped`: Packets dropped due to queue buffer exhaustion.
+
+---
+
+### D. Why Traditional Routing Protocols Fail in This Scenario
+A classic viva exam question is: *Why can't OSPF or ECMP solve this congestion problem?*
 
 #### 1. Why OSPF (Open Shortest Path First) Fails:
-* OSPF calculates routes based on static administrative link costs, typically inversely proportional to bandwidth ($\text{Cost} = \frac{10^8}{\text{Bandwidth}}$) or static link delays.
-* Because Path A has a lower propagation delay ($5\text{ms}$) than Path B ($15\text{ms}$), OSPF calculates Path A as the shortest path for all packets.
-* **OSPF is completely load-blind.** Even if Path A is running at 130% load and dropping half of all packets, OSPF stubbornly keeps routing all traffic over Path A.
-* Furthermore, OSPF routing updates rely on flooding Link-State Advertisements (LSAs) and recomputing Dijkstra’s algorithm, which takes **several seconds to minutes**—far too slow to prevent packet drops during sudden traffic surges.
+* **OSPF is completely load-blind.** It computes routes based on static administrative link metrics ($\text{Cost} = \frac{10^8}{\text{Bandwidth}}$) or static delays.
+* Because Path A has a lower delay (5 ms) than Path B (15 ms), OSPF routes 100% of packets over Path A.
+* Even when Path A is drowning in 130% load and dropping half of all packets, OSPF will stubbornly keep sending traffic over Path A.
+* Furthermore, OSPF link-state convergence takes **several seconds to minutes**, far too slow to prevent packet drops.
 
 #### 2. Why ECMP (Equal-Cost Multi-Path) Fails:
-* ECMP distributes packets across parallel links by computing a mathematical hash of the packet header 5-tuple (`source IP, destination IP, source port, destination port, protocol`).
-* Because all datagrams in our main video/telemetry stream share the exact same 5-tuple, ECMP hashes every single packet into the exact same bucket, pinning the entire flow to Path A. ECMP has zero visibility into real-time queue occupancy or packet drops.
+* ECMP balances traffic across parallel paths by computing a hash of the packet header 5-tuple (`src IP, dst IP, src port, dst port, proto`).
+* Because all datagrams in our main flow share the exact same 5-tuple, ECMP hashes every single packet into the same bucket, pinning the entire flow to Path A. ECMP has zero real-time awareness of link utilization or queue overflow.
 
 ---
 
-### C. The Closed-Loop Telemetry & Rerouting State Machine
+# ================================================================
+# PART 2: DELIVERABLE 2 (D2 — ADVANCED FUNCTIONALITY - 25 MARKS)
+# ================================================================
 
-The SDN Controller runs a high-precision closed-loop control cycle every $\Delta t = 0.5\text{ seconds}$:
+## 1. What to Explain for Deliverable 2
+In Deliverable 2, your role is to explain **how the closed-loop telemetry engine detects congestion, executes dynamic failover, prevents route flapping, and scientifically proves performance gains**:
+1. How the closed-loop telemetry poller samples byte deltas every $\Delta t = 0.5\text{ seconds}$ to compute real-time link bitrate.
+2. The Congestion Detection Algorithm: 8.0 Mbps threshold (80% link capacity) with 2-consecutive breach filtering ($N=2$) to eliminate false triggers from momentary traffic spikes.
+3. How the controller pushes an autonomous OpenFlow 1.3 `OFPFlowMod` instruction to redirect traffic to Path B with sub-second failover latency ($\le 9.5\text{ ms}$).
+4. The Anti-Flapping Hysteresis State Machine (4.5 Mbps recovery threshold) ensuring network stability.
+5. The 3-Phase Automated Benchmark Evaluation (`src/benchmark.py` & Tab 4) demonstrating quantitative metrics and high-DPI comparative plots.
+
+---
+
+## 2. D2 Behind the Scenes: Closed-Loop SDN Engine Step-by-Step
+
+### A. The Closed-Loop Telemetry & Rerouting State Machine
 
 ```
   +-------------------------------------------------------------+
@@ -100,36 +130,42 @@ The SDN Controller runs a high-precision closed-loop control cycle every $\Delta
               If yes, clear cooldown lock.
 ```
 
-#### Detailed State Machine Steps:
-1. **Telemetry Polling (`OFPPortStatsRequest`):** The controller sends a request to Switch $S_1$ asking for the cumulative transmitted byte counters on Port 2 (Path A) and Port 3 (Path B).
-2. **Delta Throughput Calculation:**
-   $$\text{Throughput (Mbps)} = \frac{(tx\_bytes_t - tx\_bytes_{t-1}) \times 8}{\Delta t \times 1_000_000}$$
-3. **Congestion Detection Filter:**
-   - Threshold: $\text{CONGESTION\_THRESHOLD\_MBPS} = 8.0\text{ Mbps}$ (80% of link capacity).
-   - **Transient Noise Filtering ($N=2$):** A single momentary 10-millisecond traffic blip shouldn't trigger an expensive route change. The controller requires **two consecutive polling intervals** ($1.0\text{ s}$ total) of sustained overload before declaring congestion.
-4. **Dynamic OpenFlow Flow Modification (`OFPFlowMod`):**
-   - The controller constructs an `OFPFlowMod` packet targeting Ingress Switch $S_1$:
-     - **Match Fields:** `IPv4`, `Protocol=UDP (17)`, `nw_dst=10.0.0.2`, `tp_dst=9999`.
-     - **Priority:** `200` (higher than the default baseline rule of priority 100).
-     - **Action:** `OFPAT_OUTPUT -> Port 3` (Path B).
-   - Because Open vSwitch processes rules by descending priority, the hardware immediately redirects subsequent UDP datagrams out of Port 3 in **under 3 milliseconds**.
-5. **Anti-Flapping Hysteresis:**
-   - As soon as the main stream is moved to Path B, the traffic load on Path A abruptly drops to zero.
-   - If the controller were naive, it would say: *"Path A is empty now, let's move traffic back!"* That would cause an immediate loop of endless bouncing (**route flapping**).
-   - To guarantee network stability, the controller enforces **hysteresis**: traffic is held on Path B until Path A load remains stably below $\text{HYSTERESIS\_RECOVERY\_MBPS} = 4.5\text{ Mbps}$.
+---
+
+### B. Detailed Step-by-Step Mechanics
+
+#### 1. Real-Time Telemetry Calculation:
+Every $\Delta t = 0.5\text{ seconds}$, the controller reads the byte counter delta:
+$$\text{Bitrate (Mbps)} = \frac{(\text{bytes}_t - \text{bytes}_{t-1}) \times 8}{\Delta t \times 1{,}000{,}000}$$
+
+#### 2. Two-Stage Breach Filtering ($N=2$):
+* To prevent expensive, disruptive route changes due to short micro-bursts (e.g., a momentary 10 ms spike), the controller enforces a 2-consecutive breach rule.
+* Congestion is only declared when load $\ge 8.0\text{ Mbps}$ for **two consecutive intervals** ($1.0\text{ second}$ of sustained overload).
+
+#### 3. Autonomous OpenFlow 1.3 `OFPFlowMod` Injection:
+Upon confirming congestion:
+```python
+# Create high-priority flow rule
+match = parser.OFPMatch(eth_type=0x0800, ip_proto=17, ipv4_dst="10.0.0.2", udp_dst=9999)
+actions = [parser.OFPActionOutput(port=3)] # Redirect to Path B
+# Install with Priority 200 (overrides default Priority 100)
+```
+* Switch $S_1$ installs the rule into its hardware/kernel datapath in **$\approx 2.4\text{ ms}$**.
+* Subsequent packets are immediately diverted to clean Path B. Packet loss drops to **0.0%**.
+
+#### 4. Anti-Flapping Hysteresis:
+* When the main flow shifts to Path B, Path A's load drops abruptly.
+* Without hysteresis, a naive controller would immediately shift traffic back to Path A, creating an endless loop of route flapping.
+* Our controller enforces **hysteresis**: traffic is held on Path B until Path A load remains stably below **`4.5 Mbps`** ($\text{HYSTERESIS\_RECOVERY\_MBPS}$).
 
 ---
 
-### D. Automated Benchmarking Engine (`src/benchmark.py`)
-To scientifically prove the superiority of the SDN architecture, the project includes an automated benchmarking testbed:
-* Runs an identical 14-second experiment under two scenarios:
-  1. **Static Routing (Legacy Mode):** Auto-SDN rerouting is disabled. When the 7.0 Mbps congestion burst hits Path A, the switch cannot adapt.
-  2. **Dynamic SDN Routing (Adaptive Mode):** Auto-SDN rerouting is enabled. The controller detects the overload and steers the stream to Path B.
-* Measures and plots four critical performance metrics:
-  - **Throughput:** Maintained at ~6.0 Mbps in dynamic mode vs dropping to ~3.5 Mbps in static mode.
-  - **Packet Loss:** Drops from ~55% peak loss in static mode to 0% in dynamic mode.
-  - **Failover Recovery Time:** Quantifies the exact time taken from congestion onset to restored transmission (consistently $\le 10\text{ ms}$).
-  - **One-Way Latency & Jitter:** Demonstrates the slight tradeoff: Path B has a higher base delay (15 ms vs 5 ms), but provides **zero packet loss and rock-solid jitter stability**.
+### C. 3-Phase Automated Performance Evaluation Engine (`src/benchmark.py`)
+To empirically prove the benefits of SDN, Tab 4 executes an automated comparative evaluation across three experiments:
+1. **Experiment A (Static Routing Baseline):** Rerouting disabled. Path A saturates under 13 Mbps load; packet loss surges to ~55%, throughput collapses to ~3.5 Mbps, bufferbloat causes 100+ ms latency.
+2. **Experiment B (Dynamic SDN Rerouting):** Autonomous OpenFlow failover to Path B restores throughput to 6.0 Mbps with 0% sustained loss and sub-second recovery.
+3. **Experiment C (SDN + Closed-Loop Rate Adaptation):** When both paths experience constraints, client rate throttling dynamically matches network capacity.
+* **Features:** Live phase-by-phase table streaming, timestamped execution badges (`[Run #N — Completed at HH:MM:SS]`), and 4-panel comparative graphs.
 
 ---
 
@@ -138,7 +174,7 @@ To scientifically prove the superiority of the SDN architecture, the project inc
 ```
 [Subsystem 1: UDP Endpoints]
        |
-       | Pumps traffic across the network
+       | Generates traffic across the network
        v
 [Subsystem 2: Network Infrastructure & Virtual Switches]
        |
@@ -159,18 +195,14 @@ To scientifically prove the superiority of the SDN architecture, the project inc
        | 5. Experiences zero packet drops, restoring application performance
 ```
 
-1. **Complementing Subsystem 1 (UDP Sockets):**
-   - Subsystem 1's UDP streams are inherently defenseless against congestion. Subsystem 3 acts as their guardian angel, monitoring their path health and steering them to safety before severe drop-tail loss degrades the user experience.
-2. **Complementing Subsystem 2 (Network Infrastructure):**
-   - Subsystem 2 builds the physical switches and links, but those switches have no inherent intelligence. Subsystem 3 provides the brain that transforms those switches into an adaptive, self-healing software-defined network fabric.
-
 ---
 
-## 4. Key Libraries & Why They Were Chosen
+## 4. Key Libraries & Technical Justifications
 
 | Library / Module | Purpose in Subsystem 3 | Technical Justification |
 | :--- | :--- | :--- |
 | **`ryu.base.app_manager`** | Standard Ryu OpenFlow 1.3 controller framework. | Industry-standard SDN controller framework used in production research and enterprise network virtualization. |
 | **`ryu.ofproto.ofproto_v1_3`** | OpenFlow 1.3 protocol message definitions (`OFPFlowMod`, `OFPPortStatsRequest`). | Implements modern OpenFlow 1.3 multi-table pipeline matching and 64-bit port statistics counters. |
-| **`matplotlib`** | Generates real-time plots in the GUI and renders publication-ready benchmark charts (`evaluation_results.png`). | High-DPI crisp vector rendering with subpixel antialiasing and headless server rendering support. |
+| **`pyqtgraph`** | Hardware-accelerated real-time live telemetry charting in the GUI. | Sub-millisecond vector rendering (<0.3 ms updates) with native interactive panning and zooming. |
+| **`matplotlib`** | Generates publication-ready comparative benchmark charts (`evaluation_results.png`). | High-DPI crisp vector rendering with subpixel antialiasing and headless server rendering support. |
 | **`tabulate`** | Formats raw benchmark telemetry into clean ASCII tables in the terminal. | Provides human-readable, professional terminal output during viva demonstrations. |

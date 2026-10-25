@@ -30,7 +30,8 @@ UBUNTU_BULK_APT_PACKAGES = [
     "python3-tabulate",
     "python3-psutil",
     "python3-pytest",
-    "python3-rich"
+    "python3-rich",
+    "python3-pyqtgraph"
 ]
 
 REQUIRED_PYTHON_MODULES = [
@@ -40,7 +41,8 @@ REQUIRED_PYTHON_MODULES = [
     ("rich", "python3-rich"),
     ("psutil", "python3-psutil"),
     ("pytest", "python3-pytest"),
-    ("PyQt6", "python3-pyqt6")
+    ("PyQt6", "python3-pyqt6"),
+    ("pyqtgraph", "python3-pyqtgraph")
 ]
 
 REQUIRED_SYSTEM_TOOLS = [
