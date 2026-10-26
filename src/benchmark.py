@@ -75,7 +75,8 @@ def run_single_experiment(
     # 1. Start SDN Controller
     controller = SDNController(
         congestion_threshold_mbps=CONGESTION_THRESHOLD_MBPS,
-        adaptive_routing_enabled=adaptive_enabled
+        adaptive_routing_enabled=adaptive_enabled,
+        auto_revert_enabled=False
     )
     controller.start()
 

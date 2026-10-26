@@ -1,0 +1,231 @@
+{
+  "format": "topologia-tp",
+  "version": "1.0",
+  "topology_name": "Diamond Multi-Path SDN Topology",
+  "description": "Standard 4-switch diamond topology with S1 ingress, S2 primary path, S3 alternate path, S4 egress, and 4 endpoint hosts.",
+  "switches": [
+    {
+      "id": "s1",
+      "dpid": 1,
+      "name": "S1",
+      "role": "ingress",
+      "protocols": "OpenFlow13",
+      "x": 0.26,
+      "y": 0.50,
+      "subtext": "Ingress"
+    },
+    {
+      "id": "s2",
+      "dpid": 2,
+      "name": "S2",
+      "role": "primary",
+      "protocols": "OpenFlow13",
+      "x": 0.50,
+      "y": 0.22,
+      "subtext": "Primary"
+    },
+    {
+      "id": "s3",
+      "dpid": 3,
+      "name": "S3",
+      "role": "backup",
+      "protocols": "OpenFlow13",
+      "x": 0.50,
+      "y": 0.78,
+      "subtext": "Backup"
+    },
+    {
+      "id": "s4",
+      "dpid": 4,
+      "name": "S4",
+      "role": "egress",
+      "protocols": "OpenFlow13",
+      "x": 0.74,
+      "y": 0.50,
+      "subtext": "Egress"
+    }
+  ],
+  "hosts": [
+    {
+      "id": "h1",
+      "name": "H1",
+      "ip": "10.0.0.1",
+      "role": "main_sender",
+      "x": 0.08,
+      "y": 0.28,
+      "subtext": "10.0.0.1",
+      "color": "#1e66f5",
+      "connected_to": "s1"
+    },
+    {
+      "id": "h3",
+      "name": "H3",
+      "ip": "10.0.0.3",
+      "role": "cross_sender",
+      "x": 0.08,
+      "y": 0.72,
+      "subtext": "10.0.0.3",
+      "color": "#e64553",
+      "connected_to": "s1"
+    },
+    {
+      "id": "h2",
+      "name": "H2",
+      "ip": "10.0.0.2",
+      "role": "main_receiver",
+      "x": 0.92,
+      "y": 0.28,
+      "subtext": "10.0.0.2",
+      "color": "#40a02b",
+      "connected_to": "s4"
+    },
+    {
+      "id": "h4",
+      "name": "H4",
+      "ip": "10.0.0.4",
+      "role": "cross_receiver",
+      "x": 0.92,
+      "y": 0.72,
+      "subtext": "10.0.0.4",
+      "color": "#df8e1d",
+      "connected_to": "s4"
+    }
+  ],
+  "links": [
+    {
+      "id": "link_h1_s1",
+      "src": "h1",
+      "dst": "s1",
+      "label": "H1->S1",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "pen_color": "#89b4fa"
+    },
+    {
+      "id": "link_h3_s1",
+      "src": "h3",
+      "dst": "s1",
+      "label": "H3->S1",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "pen_color": "#f38ba8"
+    },
+    {
+      "id": "link_s4_h2",
+      "src": "s4",
+      "dst": "h2",
+      "label": "S4->H2",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "pen_color": "#89b4fa"
+    },
+    {
+      "id": "link_s4_h4",
+      "src": "s4",
+      "dst": "h4",
+      "label": "S4->H4",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "pen_color": "#f38ba8"
+    },
+    {
+      "id": "link_s1_s2",
+      "src": "s1",
+      "dst": "s2",
+      "label": "Path A",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "path_segment": "path_a",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s2_s4",
+      "src": "s2",
+      "dst": "s4",
+      "label": "Path A (egress)",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "path_segment": "path_a",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s1_s3",
+      "src": "s1",
+      "dst": "s3",
+      "label": "Path B",
+      "bw_mbps": 10.0,
+      "delay_ms": 15.0,
+      "max_queue": 100,
+      "path_segment": "path_b",
+      "is_bottleneck": false
+    },
+    {
+      "id": "link_s3_s4",
+      "src": "s3",
+      "dst": "s4",
+      "label": "Path B (egress)",
+      "bw_mbps": 10.0,
+      "delay_ms": 15.0,
+      "max_queue": 100,
+      "path_segment": "path_b",
+      "is_bottleneck": false
+    }
+  ],
+  "paths": {
+    "path_a": {
+      "id": "path_a",
+      "name": "Path-A (S1 -> S2 -> S4)",
+      "role": "primary",
+      "hops": ["s1", "s2", "s4"],
+      "delay_ms": 5.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 2
+    },
+    "path_b": {
+      "id": "path_b",
+      "name": "Path-B (S1 -> S3 -> S4)",
+      "role": "alternate",
+      "hops": ["s1", "s3", "s4"],
+      "delay_ms": 15.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 3
+    }
+  },
+  "traffic_profile": {
+    "main_stream": {
+      "src_host": "h1",
+      "dst_host": "h2",
+      "dst_port": 9999,
+      "nominal_rate_mbps": 6.0,
+      "packet_size_bytes": 1024
+    },
+    "cross_traffic": {
+      "src_host": "h3",
+      "dst_host": "h4",
+      "dst_port": 9998,
+      "burst_rate_mbps": 7.0,
+      "burst_duration_sec": 9.0,
+      "target_path": "path_a"
+    }
+  },
+  "sdn_policy": {
+    "congestion_threshold_mbps": 8.0,
+    "congestion_loss_threshold_pct": 3.0,
+    "hysteresis_recovery_mbps": 4.5,
+    "poll_interval_sec": 0.5,
+    "consecutive_triggers_required": 2,
+    "consecutive_recoveries_required": 4
+  }
+}

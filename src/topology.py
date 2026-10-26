@@ -1,6 +1,8 @@
-"""
+r"""
 Mininet Multi-Path Diamond Topology with OpenFlow 1.3.
 Topic 27: Congestion Detection and Dynamic Traffic Rerouting.
+
+Loads default topology from diamond.tp via topology_loader.
 
 Topology Diagram:
          [h1: 10.0.0.1] (Sender)
@@ -42,6 +44,7 @@ try:
         QUEUE_LIMIT_PACKETS, MAIN_UDP_PORT, CROSS_UDP_PORT
     )
     from src.sdn_controller import SDNController
+    from src.topology_loader import get_default_topology, load_topology
 except ImportError:
     from config import (
         HOST_H1_IP, HOST_H2_IP, HOST_H3_IP, HOST_H4_IP,
@@ -49,13 +52,47 @@ except ImportError:
         QUEUE_LIMIT_PACKETS, MAIN_UDP_PORT, CROSS_UDP_PORT
     )
     from sdn_controller import SDNController
+    try:
+        from topology_loader import get_default_topology, load_topology
+    except ImportError:
+        get_default_topology = None
+        load_topology = None
 
 
 if MININET_AVAILABLE:
     class DiamondTopo(Topo):
-        """Builds multi-path network topology with bottleneck links."""
+        """Builds multi-path network topology with bottleneck links from diamond.tp."""
 
-        def build(self):
+        def build(self, tp_file: str = ""):
+            topo_def = None
+            if tp_file and load_topology:
+                try:
+                    topo_def = load_topology(tp_file)
+                except Exception as e:
+                    info(f"[!] Warning: Could not load {tp_file} ({e}), falling back to diamond.tp\n")
+
+            if not topo_def and get_default_topology:
+                try:
+                    topo_def = get_default_topology()
+                except Exception:
+                    topo_def = None
+
+            if topo_def:
+                for sw in topo_def.switches:
+                    self.addSwitch(sw["id"], protocols=sw.get("protocols", "OpenFlow13"))
+
+                for h in topo_def.hosts:
+                    ip = h.get("ip", "10.0.0.1")
+                    self.addHost(h["id"], ip=f"{ip}/24", defaultRoute="via 10.0.0.254")
+
+                for lk in topo_def.links:
+                    bw = lk.get("bw_mbps", 10.0)
+                    delay = f"{lk.get('delay_ms', 5.0)}ms"
+                    q_max = lk.get("max_queue", 100)
+                    self.addLink(lk["src"], lk["dst"], bw=bw, delay=delay, max_queue_size=q_max)
+                return
+
+            # Hardcoded fallback
             # Add switches with OpenFlow 1.3 support
             s1 = self.addSwitch("s1", protocols="OpenFlow13")
             s2 = self.addSwitch("s2", protocols="OpenFlow13")

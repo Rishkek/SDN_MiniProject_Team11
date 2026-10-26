@@ -10,7 +10,7 @@ Key Capabilities:
    - Dedicated full-height SDN Dynamic Rerouting Analytics Dashboard with spacious multi-metric graphs.
 3. Pop-out, Float & Dock-back Architecture:
    - Any tab can be popped out into an independent, freely resizable OS window with 1 click.
-   - Popped-out windows feature '📥 Dock Back In' buttons and close-to-dock event handling.
+   - Popped-out windows feature ' Dock Back In' buttons and close-to-dock event handling.
    - Multi-monitor support via View -> Pop Out All Windows and Dock All Windows Back In.
 4. Live Visual Diamond Topology with moving packet streams, queue buffer meter, and active path highlights.
 5. Embedded Real-Time Datagram Stream Terminal + Launch External OS Terminal button.
@@ -72,6 +72,7 @@ from src.udp_receiver import UDPReceiver
 from src.congestion_generator import CongestionGenerator
 from src.protocol import FLOW_MAIN, FLOW_CROSS
 from src.benchmark import plot_benchmark_results
+from src.topology_loader import get_default_topology, load_topology, InvalidTopologyExtensionError
 
 
 class PacketDot:
@@ -145,6 +146,98 @@ class AnimatedTopologyCanvas(QWidget):
         self._dot_color_main = QColor("#89b4fa")
         self._dot_color_cross = QColor("#f38ba8")
 
+        # Load default diamond.tp topology
+        try:
+            self.topo_def = get_default_topology()
+        except Exception:
+            self.topo_def = None
+
+        # Top-Right (+load topology) button for Topologia (.tp) file loading
+        self.btn_load_topo = QPushButton("(+load topology)", self)
+        self.btn_load_topo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_load_topo.setToolTip("Open Topologia (.tp) network topology file in file explorer")
+        self.btn_load_topo.setStyleSheet("""
+            QPushButton {
+                background-color: #313244;
+                color: #89b4fa;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 11px;
+                font-weight: bold;
+                border: 1px solid #45475a;
+                border-radius: 4px;
+                padding: 3px 8px;
+            }
+            QPushButton:hover {
+                background-color: #45475a;
+                color: #b4befe;
+                border: 1px solid #89b4fa;
+            }
+            QPushButton:pressed {
+                background-color: #585b70;
+            }
+        """)
+        self.btn_load_topo.clicked.connect(self._open_topology_file_dialog)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "btn_load_topo"):
+            btn_w = self.btn_load_topo.sizeHint().width() + 10
+            btn_h = self.btn_load_topo.sizeHint().height() + 2
+            self.btn_load_topo.setGeometry(self.width() - btn_w - 12, 10, btn_w, btn_h)
+            self.btn_load_topo.raise_()
+
+    def _open_topology_file_dialog(self):
+        """Opens file explorer to choose and load a Topologia (.tp) topology file."""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Topology File (*.tp)",
+            os.getcwd(),
+            "Topologia Files (*.tp);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        if not filepath.lower().endswith(".tp"):
+            QMessageBox.warning(
+                self,
+                "Invalid Topology Extension",
+                f"Only files with a '.tp' extension are supported by the Topologia loader.\n\n"
+                f"Selected file: {os.path.basename(filepath)}"
+            )
+            return
+
+        try:
+            topo = load_topology(filepath)
+            self.set_topology(topo)
+
+            # Notify parent window if available
+            parent_win = self.window()
+            if hasattr(parent_win, "on_topology_loaded"):
+                parent_win.on_topology_loaded(topo)
+
+            QMessageBox.information(
+                self,
+                "Topology Loaded",
+                f"Successfully loaded '{topo.name}' from {os.path.basename(filepath)}!\n\n"
+                f"• Switches: {len(topo.switches)}\n"
+                f"• Hosts: {len(topo.hosts)}\n"
+                f"• Links: {len(topo.links)}\n"
+                f"• Primary Path: {topo.get_path('path_a', {}).get('name', 'Path A')}\n"
+                f"• Alternate Path: {topo.get_path('path_b', {}).get('name', 'Path B')}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Topology Load Error",
+                f"Failed to load topology from {os.path.basename(filepath)}:\n{e}"
+            )
+
+    def set_topology(self, topo):
+        """Applies a newly loaded TopologyDefinition and refreshes canvas."""
+        self.topo_def = topo
+        self.packets.clear()
+        self.update()
+
     def update_state(self, active_path: str, load_a: float, load_b: float, congested: bool,
                      q_occupancy: float, q_limit: int, main_active: bool, cross_active: bool):
         self.active_path = active_path
@@ -187,14 +280,25 @@ class AnimatedTopologyCanvas(QWidget):
         w = max(360, self.width())
         h = max(240, self.height())
 
-        pos_h1 = (int(w * 0.08), int(h * 0.28))
-        pos_h3 = (int(w * 0.08), int(h * 0.72))
-        pos_s1 = (int(w * 0.26), int(h * 0.50))
-        pos_s2 = (int(w * 0.50), int(h * 0.22))  # Path A
-        pos_s3 = (int(w * 0.50), int(h * 0.78))  # Path B
-        pos_s4 = (int(w * 0.74), int(h * 0.50))
-        pos_h2 = (int(w * 0.92), int(h * 0.28))
-        pos_h4 = (int(w * 0.92), int(h * 0.72))
+        # Dynamic coordinates loaded from Topologia (.tp) definition or diamond baseline
+        if self.topo_def:
+            pos_h1 = (int(w * self.topo_def.get_node_pos("h1", (0.08, 0.28))[0]), int(h * self.topo_def.get_node_pos("h1", (0.08, 0.28))[1]))
+            pos_h3 = (int(w * self.topo_def.get_node_pos("h3", (0.08, 0.72))[0]), int(h * self.topo_def.get_node_pos("h3", (0.08, 0.72))[1]))
+            pos_s1 = (int(w * self.topo_def.get_node_pos("s1", (0.26, 0.50))[0]), int(h * self.topo_def.get_node_pos("s1", (0.26, 0.50))[1]))
+            pos_s2 = (int(w * self.topo_def.get_node_pos("s2", (0.50, 0.22))[0]), int(h * self.topo_def.get_node_pos("s2", (0.50, 0.22))[1]))
+            pos_s3 = (int(w * self.topo_def.get_node_pos("s3", (0.50, 0.78))[0]), int(h * self.topo_def.get_node_pos("s3", (0.50, 0.78))[1]))
+            pos_s4 = (int(w * self.topo_def.get_node_pos("s4", (0.74, 0.50))[0]), int(h * self.topo_def.get_node_pos("s4", (0.74, 0.50))[1]))
+            pos_h2 = (int(w * self.topo_def.get_node_pos("h2", (0.92, 0.28))[0]), int(h * self.topo_def.get_node_pos("h2", (0.92, 0.28))[1]))
+            pos_h4 = (int(w * self.topo_def.get_node_pos("h4", (0.92, 0.72))[0]), int(h * self.topo_def.get_node_pos("h4", (0.92, 0.72))[1]))
+        else:
+            pos_h1 = (int(w * 0.08), int(h * 0.28))
+            pos_h3 = (int(w * 0.08), int(h * 0.72))
+            pos_s1 = (int(w * 0.26), int(h * 0.50))
+            pos_s2 = (int(w * 0.50), int(h * 0.22))  # Path A
+            pos_s3 = (int(w * 0.50), int(h * 0.78))  # Path B
+            pos_s4 = (int(w * 0.74), int(h * 0.50))
+            pos_h2 = (int(w * 0.92), int(h * 0.28))
+            pos_h4 = (int(w * 0.92), int(h * 0.72))
 
         def draw_link(p1, p2, pen_or_color, thickness=3, label=None, alert=False):
             if isinstance(pen_or_color, QPen):
@@ -2224,6 +2328,27 @@ class MasterSDNGUI(QMainWindow):
             jitter_ms=jit,
             failover_latency_sec=rec_sec
         )
+
+    def on_topology_loaded(self, topo):
+        """Callback triggered when user loads a Topologia (.tp) file via the (+load topology) button."""
+        if hasattr(self, "emulator"):
+            self.emulator.apply_topology(topo)
+
+        if hasattr(self, "controller"):
+            policy = topo.sdn_policy
+            if policy:
+                self.controller.congestion_threshold_mbps = float(
+                    policy.get("congestion_threshold_mbps", self.controller.congestion_threshold_mbps)
+                )
+
+        path_a_info = topo.get_path("path_a")
+        if path_a_info:
+            cap_a = float(path_a_info.get("capacity_mbps", 10.0))
+            q_a = int(path_a_info.get("queue_limit", 100))
+            self.slider_bw.setValue(int(cap_a))
+            self.slider_queue.setValue(q_a)
+
+        self.statusBar().showMessage(f"Topologia loaded: {topo.name} ({os.path.basename(topo.filepath)})", 6000)
 
     def closeEvent(self, event):
         self.timer.stop()

@@ -166,6 +166,27 @@ class NetworkEmulator:
         self.link_path_a = SimulatedLink("Path-A (S1->S2->S4)", capacity_mbps=LINK_CAPACITY_MBPS, delay_ms=PATH_A_DELAY_MS)
         self.link_path_b = SimulatedLink("Path-B (S1->S3->S4)", capacity_mbps=LINK_CAPACITY_MBPS, delay_ms=PATH_B_DELAY_MS)
 
+    def apply_topology(self, topo):
+        """Applies link and path parameters from a loaded TopologyDefinition."""
+        path_a_info = topo.get_path("path_a")
+        path_b_info = topo.get_path("path_b")
+
+        if path_a_info:
+            cap_a = float(path_a_info.get("capacity_mbps", 10.0))
+            delay_a = float(path_a_info.get("delay_ms", 5.0))
+            q_a = int(path_a_info.get("queue_limit", 100))
+            self.link_path_a.set_capacity_mbps(cap_a)
+            self.link_path_a.delay_sec = delay_a / 1000.0
+            self.link_path_a.set_max_queue(q_a)
+
+        if path_b_info:
+            cap_b = float(path_b_info.get("capacity_mbps", 10.0))
+            delay_b = float(path_b_info.get("delay_ms", 15.0))
+            q_b = int(path_b_info.get("queue_limit", 100))
+            self.link_path_b.set_capacity_mbps(cap_b)
+            self.link_path_b.delay_sec = delay_b / 1000.0
+            self.link_path_b.set_max_queue(q_b)
+
     def register_packet_callback(self, cb):
         """Registers a callback function to receive packet transmission events."""
         if cb not in self.packet_callbacks:

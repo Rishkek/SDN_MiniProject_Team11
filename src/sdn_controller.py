@@ -58,11 +58,13 @@ class SDNController:
         self,
         congestion_threshold_mbps: float = CONGESTION_THRESHOLD_MBPS,
         poll_interval: float = POLL_INTERVAL_SEC,
-        adaptive_routing_enabled: bool = True
+        adaptive_routing_enabled: bool = True,
+        auto_revert_enabled: bool = True
     ):
         self.congestion_threshold_mbps = congestion_threshold_mbps
         self.poll_interval = poll_interval
         self.adaptive_routing_enabled = adaptive_routing_enabled
+        self.auto_revert_enabled = auto_revert_enabled
 
         self._running = False
         self._monitor_thread: Optional[threading.Thread] = None
@@ -75,7 +77,6 @@ class SDNController:
         self.total_reroutes = 0
         self.reroute_events: List[Dict[str, Any]] = []
         self.both_paths_congested = False
-        self.auto_revert_enabled = False
 
         # Port statistics tracking: {switch_name: {port_no: {"bytes": X, "time": T, "rate_mbps": Y}}}
         self.port_stats: Dict[str, Dict[int, Dict[str, float]]] = {}
