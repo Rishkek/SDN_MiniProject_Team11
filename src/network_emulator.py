@@ -61,14 +61,19 @@ class SimulatedLink:
     def set_max_queue(self, new_limit: int):
         """Dynamically adjusts the queue buffer limit."""
         with self._lock:
-            self.max_queue = max(10, min(100, int(new_limit)))
+            self.max_queue = max(10, min(500, int(new_limit)))
 
     def set_capacity_mbps(self, new_capacity: float):
         """Dynamically adjusts the link bandwidth capacity."""
         with self._lock:
-            self.capacity_mbps = max(1.0, min(20.0, float(new_capacity)))
+            self.capacity_mbps = max(1.0, min(50.0, float(new_capacity)))
             self._bytes_per_sec = (self.capacity_mbps * 1_000_000.0) / 8.0
             self._max_tokens = max(16384.0, self._bytes_per_sec * self._burst_depth_sec)
+
+    def set_delay_ms(self, delay_ms: float):
+        """Dynamically adjusts link propagation delay."""
+        with self._lock:
+            self.delay_sec = max(0.0001, float(delay_ms) / 1000.0)
 
     def start(self, forward_handler):
         self.forward_handler = forward_handler

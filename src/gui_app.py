@@ -72,7 +72,11 @@ from src.udp_receiver import UDPReceiver
 from src.congestion_generator import CongestionGenerator
 from src.protocol import FLOW_MAIN, FLOW_CROSS
 from src.benchmark import plot_benchmark_results
-from src.topology_loader import get_default_topology, load_topology, InvalidTopologyExtensionError
+from src.topology_loader import (
+    get_default_topology, load_topology, InvalidTopologyExtensionError,
+    TOPOLOGY_FILE_EXTENSION
+)
+from src.topology_handler import TopologyHandler
 
 
 class PacketDot:
@@ -146,16 +150,16 @@ class AnimatedTopologyCanvas(QWidget):
         self._dot_color_main = QColor("#89b4fa")
         self._dot_color_cross = QColor("#f38ba8")
 
-        # Load default diamond.tp topology
+        # Load default diamond.toponet topology
         try:
             self.topo_def = get_default_topology()
         except Exception:
             self.topo_def = None
 
-        # Top-Right (+load topology) button for Topologia (.tp) file loading
+        # Top-Right (+load topology) button for Topologia (.toponet) file loading
         self.btn_load_topo = QPushButton("(+load topology)", self)
         self.btn_load_topo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_load_topo.setToolTip("Open Topologia (.tp) network topology file in file explorer")
+        self.btn_load_topo.setToolTip(f"Open Topologia ({TOPOLOGY_FILE_EXTENSION}) network topology file in file explorer")
         self.btn_load_topo.setStyleSheet("""
             QPushButton {
                 background-color: #313244;
@@ -187,21 +191,21 @@ class AnimatedTopologyCanvas(QWidget):
             self.btn_load_topo.raise_()
 
     def _open_topology_file_dialog(self):
-        """Opens file explorer to choose and load a Topologia (.tp) topology file."""
+        """Opens file explorer to choose and load a Topologia (.toponet) topology file."""
         filepath, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Topology File (*.tp)",
+            f"Open Topologia Network File (*{TOPOLOGY_FILE_EXTENSION})",
             os.getcwd(),
-            "Topologia Files (*.tp);;All Files (*)"
+            f"Topologia Network (*{TOPOLOGY_FILE_EXTENSION});;All Files (*)"
         )
         if not filepath:
             return
 
-        if not filepath.lower().endswith(".tp"):
+        if not filepath.lower().endswith(TOPOLOGY_FILE_EXTENSION):
             QMessageBox.warning(
                 self,
                 "Invalid Topology Extension",
-                f"Only files with a '.tp' extension are supported by the Topologia loader.\n\n"
+                f"Only files with a '{TOPOLOGY_FILE_EXTENSION}' extension are supported by the Topologia loader.\n\n"
                 f"Selected file: {os.path.basename(filepath)}"
             )
             return
@@ -1889,6 +1893,11 @@ class MasterSDNGUI(QMainWindow):
         # Left Column: Vertical Splitter between Topology and Live Throughput/Loss Plot
         self.left_splitter = QSplitter(Qt.Orientation.Vertical)
         self.topo_canvas = AnimatedTopologyCanvas()
+        self.topo_handler = TopologyHandler(
+            topo_def=self.topo_canvas.topo_def,
+            emulator=self.emulator,
+            sdn_controller=self.controller
+        )
         self.left_splitter.addWidget(self.topo_canvas)
 
         self.plot_container = RealtimePlotContainer()
@@ -1962,67 +1971,105 @@ class MasterSDNGUI(QMainWindow):
         return scroll
 
     def _create_controls_box(self) -> QGroupBox:
-        grp = QGroupBox("Network Parameters & Stream Controls")
-        grid = QGridLayout(grp)
-        grid.setSpacing(6)
-        grid.setColumnStretch(0, 0)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(2, 0)
+        grp = QGroupBox("Topology Cables & Senders Control Panel")
+        layout = QVBoxLayout(grp)
+        layout.setSpacing(6)
 
-        # Queue Limit Slider
-        grid.addWidget(QLabel("Queue Limit:"), 0, 0)
+        # Subsection 1: Cable Bottlenecks & Buffers
+        sec_cables = QFrame()
+        sec_cables.setStyleSheet("background-color: #181825; border: 1px solid #313244; border-radius: 6px; padding: 6px;")
+        grid_c = QGridLayout(sec_cables)
+        grid_c.setContentsMargins(6, 4, 6, 4)
+        grid_c.setSpacing(6)
+
+        lbl_cables_header = QLabel("🔗 CABLE BOTTLENECK CONTROLS")
+        lbl_cables_header.setStyleSheet("color: #89b4fa; font-weight: bold; font-size: 10px;")
+        grid_c.addWidget(lbl_cables_header, 0, 0, 1, 3)
+
+        # Path A Cable Bottleneck (S1->S2->S4)
+        grid_c.addWidget(QLabel("Path-A Cable BW:"), 1, 0)
+        self.slider_bw_a = QSlider(Qt.Orientation.Horizontal)
+        self.slider_bw_a.setRange(1, 25)
+        self.slider_bw_a.setValue(10)
+        self.slider_bw_a.valueChanged.connect(self._on_cable_a_bw_changed)
+        grid_c.addWidget(self.slider_bw_a, 1, 1)
+        self.lbl_val_bw_a = QLabel("10.0 Mbps")
+        self.lbl_val_bw_a.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        grid_c.addWidget(self.lbl_val_bw_a, 1, 2)
+
+        # Path B Cable Bottleneck (S1->S3->S4)
+        grid_c.addWidget(QLabel("Path-B Cable BW:"), 2, 0)
+        self.slider_bw_b = QSlider(Qt.Orientation.Horizontal)
+        self.slider_bw_b.setRange(1, 25)
+        self.slider_bw_b.setValue(10)
+        self.slider_bw_b.valueChanged.connect(self._on_cable_b_bw_changed)
+        grid_c.addWidget(self.slider_bw_b, 2, 1)
+        self.lbl_val_bw_b = QLabel("10.0 Mbps")
+        self.lbl_val_bw_b.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        grid_c.addWidget(self.lbl_val_bw_b, 2, 2)
+
+        # Backward compatibility aliases
+        self.slider_bw = self.slider_bw_a
+        self.lbl_val_bw = self.lbl_val_bw_a
+
+        # Cable Queue Limit Slider
+        grid_c.addWidget(QLabel("Queue Buffer Limit:"), 3, 0)
         self.slider_queue = QSlider(Qt.Orientation.Horizontal)
-        self.slider_queue.setRange(10, 100)
+        self.slider_queue.setRange(10, 200)
         self.slider_queue.setValue(100)
         self.slider_queue.valueChanged.connect(self._on_queue_changed)
-        grid.addWidget(self.slider_queue, 0, 1)
+        grid_c.addWidget(self.slider_queue, 3, 1)
         self.lbl_val_queue = QLabel("100 pkts")
         self.lbl_val_queue.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        grid.addWidget(self.lbl_val_queue, 0, 2)
+        grid_c.addWidget(self.lbl_val_queue, 3, 2)
 
-        # Bottleneck Bandwidth Slider
-        grid.addWidget(QLabel("Bottleneck BW:"), 1, 0)
-        self.slider_bw = QSlider(Qt.Orientation.Horizontal)
-        self.slider_bw.setRange(2, 10)
-        self.slider_bw.setValue(10)
-        self.slider_bw.valueChanged.connect(self._on_bw_changed)
-        grid.addWidget(self.slider_bw, 1, 1)
-        self.lbl_val_bw = QLabel("10.0 Mbps")
-        self.lbl_val_bw.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        grid.addWidget(self.lbl_val_bw, 1, 2)
+        layout.addWidget(sec_cables)
 
-        # Host Sending Rate Slider
-        grid.addWidget(QLabel("Main Send Rate:"), 2, 0)
+        # Subsection 2: Sender Transmission Rates
+        sec_senders = QFrame()
+        sec_senders.setStyleSheet("background-color: #181825; border: 1px solid #313244; border-radius: 6px; padding: 6px;")
+        grid_s = QGridLayout(sec_senders)
+        grid_s.setContentsMargins(6, 4, 6, 4)
+        grid_s.setSpacing(6)
+
+        lbl_senders_header = QLabel("📡 TRAFFIC SENDER CONTROLS")
+        lbl_senders_header.setStyleSheet("color: #a6e3a1; font-weight: bold; font-size: 10px;")
+        grid_s.addWidget(lbl_senders_header, 0, 0, 1, 3)
+
+        # Main Sending Rate Slider (Main Sender H1)
+        grid_s.addWidget(QLabel("Main Send Rate (H1):"), 1, 0)
         self.slider_host_rate = QSlider(Qt.Orientation.Horizontal)
-        self.slider_host_rate.setRange(1, 10)
+        self.slider_host_rate.setRange(1, 20)
         self.slider_host_rate.setValue(6)
         self.slider_host_rate.valueChanged.connect(self._on_host_rate_changed)
-        grid.addWidget(self.slider_host_rate, 2, 1)
+        grid_s.addWidget(self.slider_host_rate, 1, 1)
         self.lbl_val_host = QLabel("6.0 Mbps")
-        self.lbl_val_host.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        grid.addWidget(self.lbl_val_host, 2, 2)
+        self.lbl_val_host.setStyleSheet("font-weight: bold; color: #a6e3a1;")
+        grid_s.addWidget(self.lbl_val_host, 1, 2)
 
-        # Cross Burst Rate Slider
-        grid.addWidget(QLabel("Cross Burst Rate:"), 3, 0)
+        # Cross Burst Rate Slider (Cross Sender H3)
+        grid_s.addWidget(QLabel("Cross Burst (H3):"), 2, 0)
         self.slider_cross_rate = QSlider(Qt.Orientation.Horizontal)
-        self.slider_cross_rate.setRange(1, 10)
+        self.slider_cross_rate.setRange(1, 20)
         self.slider_cross_rate.setValue(7)
         self.slider_cross_rate.valueChanged.connect(self._on_cross_rate_changed)
-        grid.addWidget(self.slider_cross_rate, 3, 1)
+        grid_s.addWidget(self.slider_cross_rate, 2, 1)
         self.lbl_val_cross = QLabel("7.0 Mbps")
-        self.lbl_val_cross.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        grid.addWidget(self.lbl_val_cross, 3, 2)
+        self.lbl_val_cross.setStyleSheet("font-weight: bold; color: #f38ba8;")
+        grid_s.addWidget(self.lbl_val_cross, 2, 2)
+
+        layout.addWidget(sec_senders)
 
         # Primary Action Buttons
         self.btn_toggle_sender = QPushButton("▶ Start Main UDP Stream")
         self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 7px;")
         self.btn_toggle_sender.clicked.connect(self._toggle_main_stream)
-        grid.addWidget(self.btn_toggle_sender, 4, 0, 1, 3)
+        layout.addWidget(self.btn_toggle_sender)
 
-        self.btn_inject_congestion = QPushButton("⚡ Inject Congestion (7M Burst on Path A)")
+        self.btn_inject_congestion = QPushButton("⚡ Inject Congestion (Burst on Path A)")
         self.btn_inject_congestion.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold; padding: 7px;")
         self.btn_inject_congestion.clicked.connect(self._inject_congestion)
-        grid.addWidget(self.btn_inject_congestion, 5, 0, 1, 3)
+        layout.addWidget(self.btn_inject_congestion)
 
         # Reroute Overrides in proportional HBox
         row6 = QHBoxLayout()
@@ -2033,7 +2080,7 @@ class MasterSDNGUI(QMainWindow):
         btn_force_a = QPushButton("⏮ Revert Path A")
         btn_force_a.clicked.connect(lambda: self._manual_reroute(PATH_PRIMARY))
         row6.addWidget(btn_force_a)
-        grid.addLayout(row6, 6, 0, 1, 3)
+        layout.addLayout(row6)
 
         # Auto-SDN & Reset in proportional HBox
         row7 = QHBoxLayout()
@@ -2046,13 +2093,13 @@ class MasterSDNGUI(QMainWindow):
         self.btn_reset_topo.setStyleSheet("background-color: #eba0ac; color: #11111b; font-weight: bold;")
         self.btn_reset_topo.clicked.connect(self._reset_topology)
         row7.addWidget(self.btn_reset_topo, 1)
-        grid.addLayout(row7, 7, 0, 1, 3)
+        layout.addLayout(row7)
 
         self.rate_adaptation_enabled = False
         self.btn_toggle_rate_adapt = QPushButton("UDP Rate Adaptation: OFF")
         self.btn_toggle_rate_adapt.setStyleSheet("background-color: #313244; color: #cdd6f4;")
         self.btn_toggle_rate_adapt.clicked.connect(self._toggle_rate_adapt)
-        grid.addWidget(self.btn_toggle_rate_adapt, 8, 0, 1, 3)
+        layout.addWidget(self.btn_toggle_rate_adapt)
 
         return grp
 
@@ -2166,24 +2213,44 @@ class MasterSDNGUI(QMainWindow):
     def _launch_external_terminal(self):
         self.console_widget._launch_external_terminal()
 
-    def _on_queue_changed(self, val):
-        self.lbl_val_queue.setText(f"{val} pkts")
-        self.emulator.link_path_a.set_max_queue(val)
-        self.emulator.link_path_b.set_max_queue(val)
-        self.topo_canvas.queue_limit = val
+    def _on_cable_a_bw_changed(self, val):
+        self.lbl_val_bw_a.setText(f"{val}.0 Mbps")
+        if hasattr(self, "topo_handler"):
+            self.topo_handler.set_cable_bottleneck("cable_path_a", float(val))
+        elif hasattr(self, "emulator"):
+            self.emulator.link_path_a.set_capacity_mbps(float(val))
+
+    def _on_cable_b_bw_changed(self, val):
+        self.lbl_val_bw_b.setText(f"{val}.0 Mbps")
+        if hasattr(self, "topo_handler"):
+            self.topo_handler.set_cable_bottleneck("cable_path_b", float(val))
+        elif hasattr(self, "emulator"):
+            self.emulator.link_path_b.set_capacity_mbps(float(val))
 
     def _on_bw_changed(self, val):
-        self.lbl_val_bw.setText(f"{val}.0 Mbps")
-        self.emulator.link_path_a.set_capacity_mbps(float(val))
-        self.emulator.link_path_b.set_capacity_mbps(float(val))
+        self._on_cable_a_bw_changed(val)
+        self._on_cable_b_bw_changed(val)
+
+    def _on_queue_changed(self, val):
+        self.lbl_val_queue.setText(f"{val} pkts")
+        if hasattr(self, "topo_handler"):
+            self.topo_handler.set_cable_queue_limit("all", val)
+        elif hasattr(self, "emulator"):
+            self.emulator.link_path_a.set_max_queue(val)
+            self.emulator.link_path_b.set_max_queue(val)
+        self.topo_canvas.queue_limit = val
 
     def _on_host_rate_changed(self, val):
         self.lbl_val_host.setText(f"{val}.0 Mbps")
-        if self.main_sender:
+        if hasattr(self, "topo_handler"):
+            self.topo_handler.set_sender_rate("main_sender", float(val))
+        elif self.main_sender:
             self.main_sender.set_rate(float(val))
 
     def _on_cross_rate_changed(self, val):
         self.lbl_val_cross.setText(f"{val}.0 Mbps")
+        if hasattr(self, "topo_handler"):
+            self.topo_handler.set_sender_rate("cross_sender", float(val))
 
     def _toggle_rate_adapt(self):
         self.rate_adaptation_enabled = not self.rate_adaptation_enabled
@@ -2213,6 +2280,8 @@ class MasterSDNGUI(QMainWindow):
                 feedback_port=9005
             )
             self.main_sender.start()
+            if hasattr(self, "topo_handler"):
+                self.topo_handler.attach_subsystems(main_sender=self.main_sender)
             self.btn_toggle_sender.setText("⏹ Stop Main UDP Stream")
             self.btn_toggle_sender.setStyleSheet("background-color: #eba0ac; color: #11111b; font-weight: bold; padding: 7px;")
 
@@ -2221,6 +2290,8 @@ class MasterSDNGUI(QMainWindow):
         self.is_cross_burst_active = True
         def burst():
             gen = CongestionGenerator(target_ip="127.0.0.1", target_port=9000, rate_mbps=burst_rate, duration=9.0)
+            if hasattr(self, "topo_handler"):
+                self.topo_handler.attach_subsystems(congestion_gen=gen)
             gen.run()
             self.is_cross_burst_active = False
 
@@ -2244,6 +2315,26 @@ class MasterSDNGUI(QMainWindow):
             self.main_sender = None
             self.btn_toggle_sender.setText("▶ Start Main UDP Stream")
             self.btn_toggle_sender.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 7px;")
+        if hasattr(self, "topo_handler"):
+            self.topo_handler.reset_defaults()
+            cable_a = self.topo_handler.get_cable("cable_path_a")
+            cable_b = self.topo_handler.get_cable("cable_path_b")
+            if cable_a:
+                self.slider_bw_a.setValue(int(cable_a.capacity_mbps))
+                self.lbl_val_bw_a.setText(f"{cable_a.capacity_mbps:.1f} Mbps")
+                self.slider_queue.setValue(int(cable_a.queue_limit))
+                self.lbl_val_queue.setText(f"{cable_a.queue_limit} pkts")
+            if cable_b:
+                self.slider_bw_b.setValue(int(cable_b.capacity_mbps))
+                self.lbl_val_bw_b.setText(f"{cable_b.capacity_mbps:.1f} Mbps")
+            main_s = self.topo_handler.get_sender("main_sender")
+            if main_s:
+                self.slider_host_rate.setValue(int(main_s.rate_mbps))
+                self.lbl_val_host.setText(f"{main_s.rate_mbps:.1f} Mbps")
+            cross_s = self.topo_handler.get_sender("cross_sender")
+            if cross_s:
+                self.slider_cross_rate.setValue(int(cross_s.rate_mbps))
+                self.lbl_val_cross.setText(f"{cross_s.rate_mbps:.1f} Mbps")
         self.controller.current_active_path = PATH_PRIMARY
         self.controller.total_reroutes = 0
         self.controller.consecutive_breaches = 0
@@ -2330,7 +2421,10 @@ class MasterSDNGUI(QMainWindow):
         )
 
     def on_topology_loaded(self, topo):
-        """Callback triggered when user loads a Topologia (.tp) file via the (+load topology) button."""
+        """Callback triggered when user loads a Topologia (.toponet) file via the (+load topology) button."""
+        if hasattr(self, "topo_handler"):
+            self.topo_handler.load_from_definition(topo)
+
         if hasattr(self, "emulator"):
             self.emulator.apply_topology(topo)
 
@@ -2341,12 +2435,27 @@ class MasterSDNGUI(QMainWindow):
                     policy.get("congestion_threshold_mbps", self.controller.congestion_threshold_mbps)
                 )
 
-        path_a_info = topo.get_path("path_a")
-        if path_a_info:
-            cap_a = float(path_a_info.get("capacity_mbps", 10.0))
-            q_a = int(path_a_info.get("queue_limit", 100))
-            self.slider_bw.setValue(int(cap_a))
-            self.slider_queue.setValue(q_a)
+        # Sync GUI sliders with loaded topology
+        cable_a = self.topo_handler.get_cable("cable_path_a") if hasattr(self, "topo_handler") else None
+        cable_b = self.topo_handler.get_cable("cable_path_b") if hasattr(self, "topo_handler") else None
+        if cable_a and hasattr(self, "slider_bw_a"):
+            self.slider_bw_a.setValue(int(cable_a.capacity_mbps))
+            self.lbl_val_bw_a.setText(f"{cable_a.capacity_mbps:.1f} Mbps")
+            self.slider_queue.setValue(int(cable_a.queue_limit))
+            self.lbl_val_queue.setText(f"{cable_a.queue_limit} pkts")
+        if cable_b and hasattr(self, "slider_bw_b"):
+            self.slider_bw_b.setValue(int(cable_b.capacity_mbps))
+            self.lbl_val_bw_b.setText(f"{cable_b.capacity_mbps:.1f} Mbps")
+
+        main_s = self.topo_handler.get_sender("main_sender") if hasattr(self, "topo_handler") else None
+        if main_s and hasattr(self, "slider_host_rate"):
+            self.slider_host_rate.setValue(int(main_s.rate_mbps))
+            self.lbl_val_host.setText(f"{main_s.rate_mbps:.1f} Mbps")
+
+        cross_s = self.topo_handler.get_sender("cross_sender") if hasattr(self, "topo_handler") else None
+        if cross_s and hasattr(self, "slider_cross_rate"):
+            self.slider_cross_rate.setValue(int(cross_s.rate_mbps))
+            self.lbl_val_cross.setText(f"{cross_s.rate_mbps:.1f} Mbps")
 
         self.statusBar().showMessage(f"Topologia loaded: {topo.name} ({os.path.basename(topo.filepath)})", 6000)
 

@@ -365,3 +365,66 @@ def test_l_cleanup_and_reproducibility():
     test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     test_sock.bind(("127.0.0.1", MAIN_UDP_PORT))
     test_sock.close()
+
+
+# ---------------------------------------------------------------------------
+# Test M: Topologia (.toponet) Loader & Dynamic TopologyHandler
+# ---------------------------------------------------------------------------
+def test_m_toponet_loader_and_topology_handler():
+    """Verify .toponet file validation, loading, and dynamic cable/sender control via TopologyHandler."""
+    from src.topology_loader import (
+        get_default_topology, load_topology, validate_tp_extension,
+        InvalidTopologyExtensionError, TOPOLOGY_FILE_EXTENSION
+    )
+    from src.topology_handler import TopologyHandler
+
+    # 1. Extension validation: must accept .toponet and reject legacy .tp or others
+    validate_tp_extension("custom.toponet")
+    with pytest.raises(InvalidTopologyExtensionError):
+        validate_tp_extension("video.tp")
+    with pytest.raises(InvalidTopologyExtensionError):
+        validate_tp_extension("network.json")
+
+    # 2. Load diamond.toponet
+    topo = get_default_topology()
+    assert topo is not None
+    assert len(topo.switches) == 4
+    assert len(topo.hosts) == 4
+    assert len(topo.links) == 8
+
+    # 3. Dynamic TopologyHandler management
+    ctrl = SDNController(congestion_threshold_mbps=8.0)
+    emu = NetworkEmulator(controller=ctrl, ingress_port=20025)
+    handler = TopologyHandler(topo, emulator=emu, sdn_controller=ctrl)
+
+    assert "cable_path_a" in handler.cables
+    assert "cable_path_b" in handler.cables
+    assert "main_sender" in handler.senders
+    assert "cross_sender" in handler.senders
+
+    # 4. Independent cable bottleneck control
+    handler.set_cable_bottleneck("cable_path_a", 15.0)
+    handler.set_cable_bottleneck("cable_path_b", 4.0)
+    assert handler.cables["cable_path_a"].capacity_mbps == 15.0
+    assert handler.cables["cable_path_b"].capacity_mbps == 4.0
+    assert emu.link_path_a.capacity_mbps == 15.0
+    assert emu.link_path_b.capacity_mbps == 4.0
+
+    # 5. Independent sender rate control
+    handler.set_sender_rate("main_sender", 9.5)
+    handler.set_sender_rate("cross_sender", 3.2)
+    assert handler.senders["main_sender"].rate_mbps == 9.5
+    assert handler.senders["cross_sender"].rate_mbps == 3.2
+
+    # 6. Queue limit and reroute notifications
+    handler.set_cable_queue_limit("all", 75)
+    assert emu.link_path_a.max_queue == 75
+    assert emu.link_path_b.max_queue == 75
+
+    handler.on_reroute("path_b")
+    assert not handler.cables["cable_path_a"].is_active
+    assert handler.cables["cable_path_b"].is_active
+
+    handler.reset_defaults()
+    assert handler.cables["cable_path_a"].capacity_mbps == 10.0
+    assert handler.cables["cable_path_b"].capacity_mbps == 10.0

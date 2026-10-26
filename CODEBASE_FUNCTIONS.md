@@ -19,8 +19,8 @@
 | **`src/network_emulator.py`** | Software-defined network emulator. Emulates OpenFlow Diamond topology with ... | 14 |
 | **`src/sdn_controller.py`** | Centralized OpenFlow 1.3 controller and congestion telemetry engine. Polls ... | 12 |
 | **`src/ryu_controller.py`** | Standard Ryu OpenFlow 1.3 controller application. Implements event-driven h... | 7 |
-| **`src/topology.py`** | Mininet multi-path Diamond network topology script. Creates virtual switche... | 3 |
-| **`src/topology_loader.py`** | Topology loader engine for Topologia (.tp) files. Validates .tp extensions,... | 13 |
+| **`src/topology_handler.py`** | Dynamic topology interaction manager. Coordinates cable bottlenecks, senders, and sidebar controls. | 10 |
+| **`src/topology_loader.py`** | Topology loader engine for Topologia (.toponet) files. Validates extensions and loads schemas. | 13 |
 | **`src/benchmark.py`** | Automated comparative benchmark test suite. Executes experiments across Sta... | 3 |
 | **`src/gui_app.py`** | Comprehensive PyQt5 / PyQtGraph GUI application. Implements animated topolo... | 69 |
 
@@ -626,35 +626,91 @@
 
 ---
 
-## 9. `src/topology.py`
+## 9. `src/topology_handler.py`
 
 > **File Description:**  
-> Mininet multi-path Diamond network topology script. Creates virtual switches (S1-S4), hosts (H1-H4), sets link delays, bandwidth limits, and configures baseline OpenFlow 1.3 flow rules.
+> Central manager for dynamic topology interactions and reactions. Manages cable bottleneck constraints, queue limits, sender pacing rates, and synchronizes real-time updates across the network emulator, SDN controller, and GUI sidebar controls.
 
-### Functions & Methods (3 documented)
+### Functions & Methods (10 documented)
 
 +--------------------------------------------------------------------------------+
-| [METHOD] DiamondTopo.build
-| Signature: DiamondTopo.build(tp_file: str = '')
+| [METHOD] CableElement.__init__
+| Signature: CableElement.__init__(cable_id: str, name: str, cable_type: str, src: str, dst: str, capacity_mbps: float = 10.0, delay_ms: float = 5.0, queue_limit: int = 100, path_segment: str = '')
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Constructs the Diamond network topology. Dynamically loads definitions from diamond.tp via topology_loader if available; otherwise falls back to baseline: 4 OpenFlow 1.3 switches, 4 hosts, 100M edge links, and 10M bottleneck links with 100-packet max queue buffers.
-  - **Inputs:** tp_file (str): Optional path to .tp file.
+  - **Purpose:** Encapsulates a physical or virtual cable/link in the topology with attributes for capacity, delay, max queue limit, path affiliation, and active status.
+  - **Inputs:** cable_id (str), name (str), cable_type (str), src (str), dst (str), capacity_mbps (float), delay_ms (float), queue_limit (int), path_segment (str).
+  - **Outputs:** CableElement instance.
+
++--------------------------------------------------------------------------------+
+| [METHOD] SenderElement.__init__
+| Signature: SenderElement.__init__(sender_id: str, name: str, host_id: str, target_ip: str, target_port: int, rate_mbps: float = 6.0, role: str = 'main_sender')
++--------------------------------------------------------------------------------+
+  - **Purpose:** Encapsulates an active or configurable traffic generator (e.g. Main stream sender H1 or Cross-traffic burst generator H3) with target destination, rate, and running state.
+  - **Inputs:** sender_id (str), name (str), host_id (str), target_ip (str), target_port (int), rate_mbps (float), role (str).
+  - **Outputs:** SenderElement instance.
+
++--------------------------------------------------------------------------------+
+| [METHOD] TopologyHandler.__init__
+| Signature: TopologyHandler.__init__(topo_def=None, emulator=None, sdn_controller=None)
++--------------------------------------------------------------------------------+
+  - **Purpose:** Initializes topology handler, binds topology definition, network emulator, and SDN controller, and extracts cable and sender inventories.
+  - **Inputs:** topo_def (TopologyDefinition), emulator (NetworkEmulator), sdn_controller (SDNController).
+  - **Outputs:** TopologyHandler instance.
+
++--------------------------------------------------------------------------------+
+| [METHOD] TopologyHandler.load_from_definition
+| Signature: TopologyHandler.load_from_definition(topo_def)
++--------------------------------------------------------------------------------+
+  - **Purpose:** Reconstructs cable elements (primary bottleneck Path A, alternate bottleneck Path B, host edge links) and sender elements from a parsed TopologyDefinition, applying settings to emulator links.
+  - **Inputs:** topo_def (TopologyDefinition).
   - **Outputs:** None.
 
 +--------------------------------------------------------------------------------+
-| [FUNCTION] setup_ovs_flows
-| Signature: setup_ovs_flows()
+| [METHOD] TopologyHandler.set_cable_bottleneck
+| Signature: TopologyHandler.set_cable_bottleneck(cable_id: str, capacity_mbps: float)
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Executes 'ovs-ofctl add-flow' commands to establish initial OpenFlow 1.3 baseline rules on switches S1-S4: normal forwarding for S2/S3/S4, ARP flood on S1, and default UDP routing to Path A (Port 2).
+  - **Purpose:** Dynamically adjusts the bottleneck bandwidth capacity of a specific cable (Path A or Path B) and applies rate changes immediately to emulator token-bucket limiters.
+  - **Inputs:** cable_id (str): Cable identifier; capacity_mbps (float): New bandwidth capacity (1-50 Mbps).
+  - **Outputs:** None.
+
++--------------------------------------------------------------------------------+
+| [METHOD] TopologyHandler.set_cable_queue_limit
+| Signature: TopologyHandler.set_cable_queue_limit(cable_id: str, queue_limit: int)
++--------------------------------------------------------------------------------+
+  - **Purpose:** Adjusts drop-tail queue buffer capacity for individual or all cables in the topology.
+  - **Inputs:** cable_id (str): Cable ID or 'all'; queue_limit (int): Buffer capacity in packets (10-500).
+  - **Outputs:** None.
+
++--------------------------------------------------------------------------------+
+| [METHOD] TopologyHandler.set_cable_delay
+| Signature: TopologyHandler.set_cable_delay(cable_id: str, delay_ms: float)
++--------------------------------------------------------------------------------+
+  - **Purpose:** Dynamically adjusts propagation delay on specified cable links.
+  - **Inputs:** cable_id (str): Cable identifier; delay_ms (float): Propagation delay in ms.
+  - **Outputs:** None.
+
++--------------------------------------------------------------------------------+
+| [METHOD] TopologyHandler.set_sender_rate
+| Signature: TopologyHandler.set_sender_rate(sender_id: str, rate_mbps: float)
++--------------------------------------------------------------------------------+
+  - **Purpose:** Adjusts transmission pacing rate of a traffic sender (Main sender or Cross burst generator) and updates active socket sender threads in real time.
+  - **Inputs:** sender_id (str): Sender identifier; rate_mbps (float): Target sending rate (0.5-30 Mbps).
+  - **Outputs:** None.
+
++--------------------------------------------------------------------------------+
+| [METHOD] TopologyHandler.on_reroute
+| Signature: TopologyHandler.on_reroute(active_path: str)
++--------------------------------------------------------------------------------+
+  - **Purpose:** Updates internal active/inactive status across cables when SDN controller triggers a path switch between Path A and Path B.
+  - **Inputs:** active_path (str): Target active path key ('path_a' or 'path_b').
+  - **Outputs:** None.
+
++--------------------------------------------------------------------------------+
+| [METHOD] TopologyHandler.reset_defaults
+| Signature: TopologyHandler.reset_defaults()
++--------------------------------------------------------------------------------+
+  - **Purpose:** Restores nominal cable capacities (10 Mbps), queue limits (100 pkts), and default sender rates.
   - **Inputs:** None.
-  - **Outputs:** None.
-
-+--------------------------------------------------------------------------------+
-| [FUNCTION] run_mininet_environment
-| Signature: run_mininet_environment(cli_mode: bool = False, run_demo: bool = True)
-+--------------------------------------------------------------------------------+
-  - **Purpose:** Instantiates Mininet network with DiamondTopo, RemoteController (port 6653), and OVSKernelSwitch. Starts network, installs baseline flows, starts SDN controller, runs automated congestion demo, and optionally drops to interactive Mininet CLI.
-  - **Inputs:** cli_mode (bool): Whether to drop into interactive Mininet CLI; run_demo (bool): Whether to execute automated congestion test.
   - **Outputs:** None.
 
 ---
@@ -662,7 +718,7 @@
 ## 10. `src/topology_loader.py`
 
 > **File Description:**  
-> Topology loader engine for Topologia (.tp) files. Validates .tp extensions, parses JSON topology schemas, converts definitions to Mininet Topo instances, and configures emulator links and canvas layouts.
+> Topology loader engine for Topologia (.toponet) files. Validates .toponet extensions, parses JSON topology schemas, converts definitions to Mininet Topo instances, and configures emulator links and canvas layouts.
 
 ### Functions & Methods (13 documented)
 
@@ -670,7 +726,7 @@
 | [CLASS EXCEPTION] InvalidTopologyExtensionError
 | Signature: class InvalidTopologyExtensionError(ValueError)
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Custom exception raised when attempting to load a topology file that does not have the mandatory '.tp' extension.
+  - **Purpose:** Custom exception raised when attempting to load a topology file that does not have the mandatory '.toponet' extension.
   - **Inputs:** Message string describing the invalid extension.
   - **Outputs:** Exception instance.
 
@@ -678,7 +734,7 @@
 | [CLASS EXCEPTION] CorruptTopologyFileError
 | Signature: class CorruptTopologyFileError(ValueError)
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Custom exception raised when a .tp file contains invalid JSON or is missing essential topology schema fields (switches, hosts, links).
+  - **Purpose:** Custom exception raised when a .toponet file contains invalid JSON or is missing essential topology schema fields (switches, hosts, links).
   - **Inputs:** Message string describing corrupt data or missing field.
   - **Outputs:** Exception instance.
 
@@ -686,7 +742,7 @@
 | [METHOD] TopologyDefinition.__init__
 | Signature: TopologyDefinition.__init__(data: Dict[str, Any], filepath: str = '')
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Parses and structures .tp topology dictionary: extracts format, version, topology_name, description, switches, hosts, links, paths, traffic_profile, and sdn_policy. Builds fast lookup node map.
+  - **Purpose:** Parses and structures .toponet topology dictionary: extracts format, version, topology_name, description, switches, hosts, links, paths, traffic_profile, and sdn_policy. Builds fast lookup node map.
   - **Inputs:** data (dict): Raw parsed JSON dictionary; filepath (str): Source file path.
   - **Outputs:** TopologyDefinition instance.
 
@@ -758,15 +814,15 @@
 | [FUNCTION] get_default_topology_path
 | Signature: get_default_topology_path() -> str
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Locates the default diamond.tp file in workspace root or source directories.
+  - **Purpose:** Locates the default diamond.toponet file in workspace root or source directories.
   - **Inputs:** None.
-  - **Outputs:** str: Resolved path to diamond.tp.
+  - **Outputs:** str: Resolved path to diamond.toponet.
 
 +--------------------------------------------------------------------------------+
 | [FUNCTION] get_default_topology
 | Signature: get_default_topology() -> TopologyDefinition
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Loads and returns the default diamond topology from diamond.tp.
+  - **Purpose:** Loads and returns the default diamond topology from diamond.toponet.
   - **Inputs:** None.
   - **Outputs:** TopologyDefinition: Default diamond topology definition.
 

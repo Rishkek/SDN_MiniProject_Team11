@@ -1,5 +1,5 @@
 {
-  "format": "topologia-tp",
+  "format": "topologia-network",
   "version": "1.0",
   "topology_name": "Diamond Multi-Path SDN Topology",
   "description": "Standard 4-switch diamond topology with S1 ingress, S2 primary path, S3 alternate path, S4 egress, and 4 endpoint hosts.",
@@ -58,17 +58,6 @@
       "connected_to": "s1"
     },
     {
-      "id": "h3",
-      "name": "H3",
-      "ip": "10.0.0.3",
-      "role": "cross_sender",
-      "x": 0.08,
-      "y": 0.72,
-      "subtext": "10.0.0.3",
-      "color": "#e64553",
-      "connected_to": "s1"
-    },
-    {
       "id": "h2",
       "name": "H2",
       "ip": "10.0.0.2",
@@ -76,8 +65,19 @@
       "x": 0.92,
       "y": 0.28,
       "subtext": "10.0.0.2",
-      "color": "#40a02b",
+      "color": "#a6e3a1",
       "connected_to": "s4"
+    },
+    {
+      "id": "h3",
+      "name": "H3",
+      "ip": "10.0.0.3",
+      "role": "cross_sender",
+      "x": 0.08,
+      "y": 0.72,
+      "subtext": "10.0.0.3",
+      "color": "#f38ba8",
+      "connected_to": "s1"
     },
     {
       "id": "h4",
@@ -167,7 +167,7 @@
       "delay_ms": 15.0,
       "max_queue": 100,
       "path_segment": "path_b",
-      "is_bottleneck": false
+      "is_bottleneck": true
     },
     {
       "id": "link_s3_s4",
@@ -178,7 +178,7 @@
       "delay_ms": 15.0,
       "max_queue": 100,
       "path_segment": "path_b",
-      "is_bottleneck": false
+      "is_bottleneck": true
     }
   ],
   "paths": {

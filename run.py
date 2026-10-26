@@ -152,7 +152,7 @@ def run_mininet_mode():
         print("[!] You can run the interactive simulation mode directly on this machine!")
         return
 
-    topo_path = os.path.join(BASE_DIR, "src", "topology.py")
+    topo_path = os.path.join(BASE_DIR, "src", "topology_loader.py")
     is_root = (os.geteuid() == 0) if hasattr(os, "geteuid") else False
     cmd = ["python3", topo_path, "--cli"] if is_root else ["sudo", "python3", topo_path, "--cli"]
     subprocess.call(cmd)
@@ -179,7 +179,7 @@ D1: Initial Deliverables (15 Marks)
             - src/udp_sender.py: High-precision rate pacing & sequence tracking.
             - src/udp_receiver.py: Sequence checking, RFC 3550 jitter, latency.
   [4 Marks] Mininet + SDN Implementation:
-            - src/topology.py: Mininet DiamondTopo with 10 Mbps bottleneck links.
+            - src/topology_loader.py: Custom .toponet loader with Mininet translation.
             - src/sdn_controller.py: OpenFlow 1.3 FlowMod dispatcher.
             - src/ryu_controller.py: Ryu OpenFlow 1.3 controller application.
   [3 Marks] Socket-SDN Integration:
