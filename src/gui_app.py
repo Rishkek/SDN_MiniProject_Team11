@@ -192,14 +192,31 @@ class AnimatedTopologyCanvas(QWidget):
 
     def _open_topology_file_dialog(self):
         """Opens file explorer to choose and load a topology (.json) file."""
+        # Always start in the current working directory / topology_src or the last used directory
+        start_dir = getattr(self, "_last_topo_dir", None)
+        if not start_dir or not os.path.isdir(start_dir):
+            cand_topo_src = os.path.join(os.getcwd(), "topology_src")
+            if os.path.isdir(cand_topo_src):
+                start_dir = cand_topo_src
+            else:
+                start_dir = os.getcwd()
+
+        # Normalize with trailing slash so Windows native file picker opens directly inside the target directory
+        start_dir = os.path.abspath(start_dir).replace("\\", "/")
+        if not start_dir.endswith("/"):
+            start_dir += "/"
+
         filepath, _ = QFileDialog.getOpenFileName(
             self,
             f"Open Topology File (*{TOPOLOGY_FILE_EXTENSION})",
-            os.getcwd(),
+            start_dir,
             f"Topology JSON (*{TOPOLOGY_FILE_EXTENSION});;All Files (*)"
         )
         if not filepath:
             return
+
+        # Persist directory so subsequent open dialogs stay in the current folder
+        self._last_topo_dir = os.path.dirname(os.path.abspath(filepath))
 
         if not filepath.lower().endswith(TOPOLOGY_FILE_EXTENSION):
             QMessageBox.warning(
@@ -1872,6 +1889,12 @@ class MasterSDNGUI(QMainWindow):
         menubar = self.menuBar()
 
         menu_file = menubar.addMenu("&File")
+        act_load_topo = QAction("📂 &Load Network Topology (.json)...", self)
+        act_load_topo.setShortcut("Ctrl+O")
+        act_load_topo.setStatusTip("Open and load a network topology definition file")
+        act_load_topo.triggered.connect(self.canvas._open_topology_file_dialog)
+        menu_file.addAction(act_load_topo)
+
         act_term = QAction("🖥 Launch External OS Terminal Monitor (CMD)", self)
         act_term.triggered.connect(self._launch_external_terminal)
         menu_file.addAction(act_term)
