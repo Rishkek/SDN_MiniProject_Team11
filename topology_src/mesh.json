@@ -11,8 +11,8 @@
       "role": "ingress",
       "protocols": "OpenFlow13",
       "subtext": "Ingress",
-      "x": 0.26,
-      "y": 0.5
+      "x": 0.35,
+      "y": 0.32
     },
     {
       "id": "s2",
@@ -21,8 +21,8 @@
       "role": "primary",
       "protocols": "OpenFlow13",
       "subtext": "Primary",
-      "x": 0.5,
-      "y": 0.22
+      "x": 0.65,
+      "y": 0.32
     },
     {
       "id": "s3",
@@ -31,8 +31,8 @@
       "role": "primary",
       "protocols": "OpenFlow13",
       "subtext": "Primary",
-      "x": 0.5,
-      "y": 0.78
+      "x": 0.35,
+      "y": 0.68
     },
     {
       "id": "s4",
@@ -41,8 +41,8 @@
       "role": "egress",
       "protocols": "OpenFlow13",
       "subtext": "Egress",
-      "x": 0.74,
-      "y": 0.5
+      "x": 0.65,
+      "y": 0.68
     }
   ],
   "hosts": [
@@ -54,7 +54,7 @@
       "subtext": "10.0.0.1",
       "color": "#1e66f5",
       "connected_to": "s1",
-      "x": 0.08,
+      "x": 0.1,
       "y": 0.28
     },
     {
@@ -65,7 +65,7 @@
       "subtext": "10.0.0.2",
       "color": "#a6e3a1",
       "connected_to": "s4",
-      "x": 0.92,
+      "x": 0.9,
       "y": 0.28
     },
     {
@@ -76,7 +76,7 @@
       "subtext": "10.0.0.3",
       "color": "#f38ba8",
       "connected_to": "s1",
-      "x": 0.08,
+      "x": 0.1,
       "y": 0.72
     },
     {
@@ -87,7 +87,7 @@
       "subtext": "10.0.0.4",
       "color": "#df8e1d",
       "connected_to": "s4",
-      "x": 0.92,
+      "x": 0.9,
       "y": 0.72
     }
   ],

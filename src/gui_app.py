@@ -287,25 +287,28 @@ class AnimatedTopologyCanvas(QWidget):
         w = max(360, self.width())
         h = max(240, self.height())
 
-        # Dynamic coordinates loaded from Topologia (.tp) definition or diamond baseline
+        # Dynamic node coordinates loaded from TopologyDefinition or diamond baseline
+        node_positions = {}
         if self.topo_def:
-            pos_h1 = (int(w * self.topo_def.get_node_pos("h1", (0.08, 0.28))[0]), int(h * self.topo_def.get_node_pos("h1", (0.08, 0.28))[1]))
-            pos_h3 = (int(w * self.topo_def.get_node_pos("h3", (0.08, 0.72))[0]), int(h * self.topo_def.get_node_pos("h3", (0.08, 0.72))[1]))
-            pos_s1 = (int(w * self.topo_def.get_node_pos("s1", (0.26, 0.50))[0]), int(h * self.topo_def.get_node_pos("s1", (0.26, 0.50))[1]))
-            pos_s2 = (int(w * self.topo_def.get_node_pos("s2", (0.50, 0.22))[0]), int(h * self.topo_def.get_node_pos("s2", (0.50, 0.22))[1]))
-            pos_s3 = (int(w * self.topo_def.get_node_pos("s3", (0.50, 0.78))[0]), int(h * self.topo_def.get_node_pos("s3", (0.50, 0.78))[1]))
-            pos_s4 = (int(w * self.topo_def.get_node_pos("s4", (0.74, 0.50))[0]), int(h * self.topo_def.get_node_pos("s4", (0.74, 0.50))[1]))
-            pos_h2 = (int(w * self.topo_def.get_node_pos("h2", (0.92, 0.28))[0]), int(h * self.topo_def.get_node_pos("h2", (0.92, 0.28))[1]))
-            pos_h4 = (int(w * self.topo_def.get_node_pos("h4", (0.92, 0.72))[0]), int(h * self.topo_def.get_node_pos("h4", (0.92, 0.72))[1]))
+            for s in self.topo_def.switches:
+                s_id = str(s.get("id", "")).lower()
+                px, py = self.topo_def.get_node_pos(s_id, (0.50, 0.50))
+                node_positions[s_id] = (int(w * px), int(h * py))
+            for host in self.topo_def.hosts:
+                h_id = str(host.get("id", "")).lower()
+                px, py = self.topo_def.get_node_pos(h_id, (0.10, 0.50))
+                node_positions[h_id] = (int(w * px), int(h * py))
         else:
-            pos_h1 = (int(w * 0.08), int(h * 0.28))
-            pos_h3 = (int(w * 0.08), int(h * 0.72))
-            pos_s1 = (int(w * 0.26), int(h * 0.50))
-            pos_s2 = (int(w * 0.50), int(h * 0.22))  # Path A
-            pos_s3 = (int(w * 0.50), int(h * 0.78))  # Path B
-            pos_s4 = (int(w * 0.74), int(h * 0.50))
-            pos_h2 = (int(w * 0.92), int(h * 0.28))
-            pos_h4 = (int(w * 0.92), int(h * 0.72))
+            node_positions = {
+                "h1": (int(w * 0.08), int(h * 0.28)),
+                "h3": (int(w * 0.08), int(h * 0.72)),
+                "s1": (int(w * 0.26), int(h * 0.50)),
+                "s2": (int(w * 0.50), int(h * 0.22)),  # Path A
+                "s3": (int(w * 0.50), int(h * 0.78)),  # Path B
+                "s4": (int(w * 0.74), int(h * 0.50)),
+                "h2": (int(w * 0.92), int(h * 0.28)),
+                "h4": (int(w * 0.92), int(h * 0.72)),
+            }
 
         def draw_link(p1, p2, pen_or_color, thickness=3, label=None, alert=False):
             if isinstance(pen_or_color, QPen):
@@ -320,24 +323,64 @@ class AnimatedTopologyCanvas(QWidget):
                 painter.setFont(self._font_bold_8)
                 painter.drawText(mid_x - 45, mid_y - 8, label)
 
-        draw_link(pos_h1, pos_s1, self._pen_link_h1, 2, "H1->S1")
-        draw_link(pos_h3, pos_s1, self._pen_link_h3, 2, "H3->S1")
-        draw_link(pos_s4, pos_h2, self._pen_link_h2, 2, "S4->H2")
-        draw_link(pos_s4, pos_h4, self._pen_link_h4, 2, "S4->H4")
+        # Dynamic link rendering based on active TopologyDefinition
+        if self.topo_def and self.topo_def.links:
+            for link in self.topo_def.links:
+                src = str(link.get("src", "")).lower()
+                dst = str(link.get("dst", "")).lower()
+                p1 = node_positions.get(src)
+                p2 = node_positions.get(dst)
+                if not p1 or not p2:
+                    continue
 
-        is_path_a_active = (self.active_path == PATH_PRIMARY)
-        color_a = self._color_path_red if self.is_congested else (self._color_path_green if is_path_a_active else self._color_path_idle)
-        thick_a = 5 if is_path_a_active or self.flow_cross_active else 2
-        label_a = f"Path A: {self.path_a_load:.1f}M " + ("[CONGESTED]" if self.is_congested else "")
-        draw_link(pos_s1, pos_s2, color_a, thick_a, label_a, alert=self.is_congested)
-        draw_link(pos_s2, pos_s4, color_a, thick_a)
+                seg = link.get("path_segment", "")
+                if seg == "path_a":
+                    is_active = (self.active_path == PATH_PRIMARY)
+                    color = self._color_path_red if self.is_congested else (self._color_path_green if is_active else self._color_path_idle)
+                    thick = 5 if is_active or self.flow_cross_active else 2
+                    raw_label = link.get("label", "Path A")
+                    lbl = (f"Path A: {self.path_a_load:.1f}M " + ("[CONGESTED]" if self.is_congested else "")) if ("Path A" in raw_label and not raw_label.endswith("M")) else raw_label
+                    draw_link(p1, p2, color, thick, lbl, alert=self.is_congested)
+                elif seg == "path_b":
+                    is_active = (self.active_path == PATH_ALTERNATE)
+                    color = self._color_path_green if is_active else self._color_path_idle
+                    thick = 5 if is_active else 2
+                    raw_label = link.get("label", "Path B")
+                    lbl = (f"Path B: {self.path_b_load:.1f}M " + ("[REROUTED]" if is_active else "[IDLE]")) if ("Path B" in raw_label and not raw_label.endswith("M")) else raw_label
+                    draw_link(p1, p2, color, thick, lbl)
+                else:
+                    pen_col = link.get("pen_color")
+                    col = QColor(pen_col) if pen_col else self._color_path_idle
+                    draw_link(p1, p2, col, 2, link.get("label", ""))
+        else:
+            # Baseline diamond link rendering
+            pos_h1 = node_positions.get("h1", (0, 0))
+            pos_h3 = node_positions.get("h3", (0, 0))
+            pos_s1 = node_positions.get("s1", (0, 0))
+            pos_s2 = node_positions.get("s2", (0, 0))
+            pos_s3 = node_positions.get("s3", (0, 0))
+            pos_s4 = node_positions.get("s4", (0, 0))
+            pos_h2 = node_positions.get("h2", (0, 0))
+            pos_h4 = node_positions.get("h4", (0, 0))
 
-        is_path_b_active = (self.active_path == PATH_ALTERNATE)
-        color_b = self._color_path_green if is_path_b_active else self._color_path_idle
-        thick_b = 5 if is_path_b_active else 2
-        label_b = f"Path B: {self.path_b_load:.1f}M " + ("[REROUTED]" if is_path_b_active else "[IDLE]")
-        draw_link(pos_s1, pos_s3, color_b, thick_b, label_b)
-        draw_link(pos_s3, pos_s4, color_b, thick_b)
+            draw_link(pos_h1, pos_s1, self._pen_link_h1, 2, "H1->S1")
+            draw_link(pos_h3, pos_s1, self._pen_link_h3, 2, "H3->S1")
+            draw_link(pos_s4, pos_h2, self._pen_link_h2, 2, "S4->H2")
+            draw_link(pos_s4, pos_h4, self._pen_link_h4, 2, "S4->H4")
+
+            is_path_a_active = (self.active_path == PATH_PRIMARY)
+            color_a = self._color_path_red if self.is_congested else (self._color_path_green if is_path_a_active else self._color_path_idle)
+            thick_a = 5 if is_path_a_active or self.flow_cross_active else 2
+            label_a = f"Path A: {self.path_a_load:.1f}M " + ("[CONGESTED]" if self.is_congested else "")
+            draw_link(pos_s1, pos_s2, color_a, thick_a, label_a, alert=self.is_congested)
+            draw_link(pos_s2, pos_s4, color_a, thick_a)
+
+            is_path_b_active = (self.active_path == PATH_ALTERNATE)
+            color_b = self._color_path_green if is_path_b_active else self._color_path_idle
+            thick_b = 5 if is_path_b_active else 2
+            label_b = f"Path B: {self.path_b_load:.1f}M " + ("[REROUTED]" if is_path_b_active else "[IDLE]")
+            draw_link(pos_s1, pos_s3, color_b, thick_b, label_b)
+            draw_link(pos_s3, pos_s4, color_b, thick_b)
 
         # Dynamic Queue Meter on Path A
         q_box_x = int(w * 0.36)
@@ -359,12 +402,31 @@ class AnimatedTopologyCanvas(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         for p in self.packets:
             painter.setBrush(QBrush(p.color))
-            if p.path == 'main_a':
-                pt = get_pos_on_segment(pos_s1, pos_s2, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(pos_s2, pos_s4, (p.progress - 0.5) * 2.0)
-            elif p.path == 'main_b':
-                pt = get_pos_on_segment(pos_s1, pos_s3, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(pos_s3, pos_s4, (p.progress - 0.5) * 2.0)
+            path_key = 'path_a' if 'a' in p.path else 'path_b'
+            path_info = self.topo_def.get_path(path_key) if self.topo_def else None
+            if not path_info and self.topo_def:
+                path_info = self.topo_def.get_path('path_a')
+
+            hops = path_info.get("hops", []) if path_info else []
+            if len(hops) >= 2:
+                n_segs = len(hops) - 1
+                seg_idx = min(int(p.progress * n_segs), n_segs - 1)
+                seg_prog = (p.progress * n_segs) - seg_idx
+                u_pos = node_positions.get(hops[seg_idx].lower())
+                v_pos = node_positions.get(hops[seg_idx + 1].lower())
+                pt = get_pos_on_segment(u_pos, v_pos, seg_prog) if (u_pos and v_pos) else (w // 2, h // 2)
+            elif len(hops) == 1:
+                sw_pos = node_positions.get(hops[0].lower(), (w // 2, h // 2))
+                h1_pos = node_positions.get("h1", (int(w * 0.1), int(h * 0.3)))
+                h2_pos = node_positions.get("h2", (int(w * 0.9), int(h * 0.3)))
+                pt = get_pos_on_segment(h1_pos, sw_pos, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(sw_pos, h2_pos, (p.progress - 0.5) * 2.0)
             else:
-                pt = get_pos_on_segment(pos_s1, pos_s2, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(pos_s2, pos_s4, (p.progress - 0.5) * 2.0)
+                s1_p = node_positions.get("s1", (int(w * 0.26), int(h * 0.5)))
+                s4_p = node_positions.get("s4", (int(w * 0.74), int(h * 0.5)))
+                mid_id = "s2" if 'a' in p.path else "s3"
+                s_mid = node_positions.get(mid_id, (int(w * 0.5), int(h * 0.25)))
+                pt = get_pos_on_segment(s1_p, s_mid, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(s_mid, s4_p, (p.progress - 0.5) * 2.0)
+
             painter.drawEllipse(int(pt[0]) - 4, int(pt[1]) - 4, 8, 8)
 
         def draw_node(pos, text, subtext, bg_color, is_switch=False):
@@ -384,15 +446,44 @@ class AnimatedTopologyCanvas(QWidget):
             painter.setFont(self._font_regular_7)
             painter.drawText(pos[0] - 35, pos[1] + rad + 1, 70, 14, Qt.AlignmentFlag.AlignCenter, subtext)
 
-        draw_node(pos_h1, "H1", "10.0.0.1", self._color_h1)
-        draw_node(pos_h3, "H3", "10.0.0.3", self._color_h3)
-        draw_node(pos_h2, "H2", "10.0.0.2", self._color_h2)
-        draw_node(pos_h4, "H4", "10.0.0.4", self._color_h4)
+        # Dynamic Node Rendering from TopologyDefinition
+        if self.topo_def and (self.topo_def.switches or self.topo_def.hosts):
+            for s in self.topo_def.switches:
+                s_id = str(s.get("id", "")).lower()
+                pos = node_positions.get(s_id)
+                if pos:
+                    name = s.get("name", s_id.upper())
+                    sub = s.get("subtext", s.get("role", "").capitalize())
+                    draw_node(pos, name, sub, self._color_switch, is_switch=True)
 
-        draw_node(pos_s1, "S1", "Ingress", self._color_switch, is_switch=True)
-        draw_node(pos_s2, "S2", "Primary", self._color_switch, is_switch=True)
-        draw_node(pos_s3, "S3", "Backup", self._color_switch, is_switch=True)
-        draw_node(pos_s4, "S4", "Egress", self._color_switch, is_switch=True)
+            for host in self.topo_def.hosts:
+                h_id = str(host.get("id", "")).lower()
+                pos = node_positions.get(h_id)
+                if pos:
+                    name = host.get("name", h_id.upper())
+                    sub = host.get("subtext", host.get("ip", ""))
+                    c_str = host.get("color")
+                    c = QColor(c_str) if c_str else self._color_h1
+                    draw_node(pos, name, sub, c, is_switch=False)
+        else:
+            pos_h1 = node_positions.get("h1", (int(w * 0.08), int(h * 0.28)))
+            pos_h3 = node_positions.get("h3", (int(w * 0.08), int(h * 0.72)))
+            pos_s1 = node_positions.get("s1", (int(w * 0.26), int(h * 0.50)))
+            pos_s2 = node_positions.get("s2", (int(w * 0.50), int(h * 0.22)))
+            pos_s3 = node_positions.get("s3", (int(w * 0.50), int(h * 0.78)))
+            pos_s4 = node_positions.get("s4", (int(w * 0.74), int(h * 0.50)))
+            pos_h2 = node_positions.get("h2", (int(w * 0.92), int(h * 0.28)))
+            pos_h4 = node_positions.get("h4", (int(w * 0.92), int(h * 0.72)))
+
+            draw_node(pos_h1, "H1", "10.0.0.1", self._color_h1)
+            draw_node(pos_h3, "H3", "10.0.0.3", self._color_h3)
+            draw_node(pos_h2, "H2", "10.0.0.2", self._color_h2)
+            draw_node(pos_h4, "H4", "10.0.0.4", self._color_h4)
+
+            draw_node(pos_s1, "S1", "Ingress", self._color_switch, is_switch=True)
+            draw_node(pos_s2, "S2", "Primary", self._color_switch, is_switch=True)
+            draw_node(pos_s3, "S3", "Backup", self._color_switch, is_switch=True)
+            draw_node(pos_s4, "S4", "Egress", self._color_switch, is_switch=True)
 
         painter.setPen(self._pen_wm)
         painter.setFont(self._font_bold_8)

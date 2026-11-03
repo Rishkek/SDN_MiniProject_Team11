@@ -11,7 +11,7 @@
       "role": "ingress",
       "protocols": "OpenFlow13",
       "subtext": "Ingress",
-      "x": 0.26,
+      "x": 0.19,
       "y": 0.5
     },
     {
@@ -21,8 +21,8 @@
       "role": "primary",
       "protocols": "OpenFlow13",
       "subtext": "Primary",
-      "x": 0.5,
-      "y": 0.22
+      "x": 0.4,
+      "y": 0.5
     },
     {
       "id": "s3",
@@ -31,8 +31,8 @@
       "role": "primary",
       "protocols": "OpenFlow13",
       "subtext": "Primary",
-      "x": 0.5,
-      "y": 0.78
+      "x": 0.6,
+      "y": 0.5
     },
     {
       "id": "s4",
@@ -41,7 +41,7 @@
       "role": "core",
       "protocols": "OpenFlow13",
       "subtext": "Core",
-      "x": 0.74,
+      "x": 0.81,
       "y": 0.5
     }
   ],
@@ -54,8 +54,8 @@
       "subtext": "10.0.0.1",
       "color": "#1e66f5",
       "connected_to": "s1",
-      "x": 0.08,
-      "y": 0.28
+      "x": 0.19,
+      "y": 0.22
     },
     {
       "id": "h2",
@@ -65,8 +65,8 @@
       "subtext": "10.0.0.2",
       "color": "#a6e3a1",
       "connected_to": "s4",
-      "x": 0.92,
-      "y": 0.28
+      "x": 0.81,
+      "y": 0.78
     },
     {
       "id": "h3",
@@ -76,8 +76,8 @@
       "subtext": "10.0.0.3",
       "color": "#f38ba8",
       "connected_to": "s2",
-      "x": 0.08,
-      "y": 0.72
+      "x": 0.4,
+      "y": 0.22
     },
     {
       "id": "h4",
@@ -87,8 +87,8 @@
       "subtext": "10.0.0.4",
       "color": "#df8e1d",
       "connected_to": "s3",
-      "x": 0.92,
-      "y": 0.72
+      "x": 0.6,
+      "y": 0.78
     }
   ],
   "links": [

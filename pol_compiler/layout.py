@@ -16,14 +16,102 @@ def compute_topology_layout(
 ) -> Dict[str, Tuple[float, float]]:
     """
     Computes normalized (x, y) coordinates in [0.08, 0.92] for canvas rendering.
-    Supports Diamond, Star, Bus, Ring, Mesh, and general graphs.
+    Supports distinct layouts for Diamond, Star, Bus, Ring, Mesh, and general graphs.
     """
     node_positions: Dict[str, Tuple[float, float]] = {}
-
-    # 1. Canonical Diamond Topology Check (s1..s4, h1..h4)
     sw_set = set(switches)
-    host_set = set(hosts)
-    if sw_set == {"s1", "s2", "s3", "s4"} and host_set == {"h1", "h2", "h3", "h4"}:
+    topo_type = topology_type.lower()
+
+    # Helper: find which switch a host connects to
+    def get_host_switch(h_id: str) -> str:
+        for u, v in edges:
+            if u == h_id and v in sw_set:
+                return v
+            elif v == h_id and u in sw_set:
+                return u
+        return switches[0] if switches else "s1"
+
+    # 1. Star Topology: single central switch with peripheral nodes
+    if topo_type == "star" or (len(switches) == 1 and hosts):
+        center_sw = switches[0]
+        node_positions[center_sw] = (0.50, 0.50)
+        n = len(hosts)
+        radius = 0.33
+        for i, h in enumerate(sorted(hosts)):
+            angle = (2.0 * math.pi * i) / n - (math.pi / 2.0)
+            x = 0.50 + radius * math.cos(angle)
+            y = 0.50 + radius * math.sin(angle)
+            node_positions[h] = (round(x, 2), round(y, 2))
+        return node_positions
+
+    # 2. Bus / Linear Backbone Topology
+    if topo_type == "bus":
+        ordered_switches = sorted(switches)
+        n_sw = len(ordered_switches)
+        step_x = 0.62 / max(1, (n_sw - 1)) if n_sw > 1 else 0.5
+        for i, s in enumerate(ordered_switches):
+            sx = 0.19 + i * step_x
+            node_positions[s] = (round(sx, 2), 0.50)
+
+        # Map hosts to their connected switches, alternating above/below the bus
+        for i, h in enumerate(sorted(hosts)):
+            target_sw = get_host_switch(h)
+            sx, _ = node_positions[target_sw]
+            # Alternate top (0.22) and bottom (0.78) across the bus
+            sy = 0.22 if (i % 2 == 0) else 0.78
+            node_positions[h] = (round(sx, 2), sy)
+        return node_positions
+
+    # 3. Ring Topology: circular loop of switches following link order
+    if topo_type == "ring":
+        G_ring = nx.Graph()
+        for u, v in edges:
+            if u in sw_set and v in sw_set:
+                G_ring.add_edge(u, v)
+
+        ordered_switches = []
+        try:
+            cycle_edges = nx.find_cycle(G_ring)
+            ordered_switches = [e[0] for e in cycle_edges]
+        except Exception:
+            ordered_switches = sorted(switches)
+
+        n_sw = len(ordered_switches)
+        radius_x = 0.22
+        radius_y = 0.18
+        for i, s in enumerate(ordered_switches):
+            # Angles starting at top-left: -3pi/4, -pi/4, pi/4, 3pi/4
+            angle = (2.0 * math.pi * i) / n_sw - (3.0 * math.pi / 4.0)
+            sx = 0.50 + radius_x * math.cos(angle) * 1.3
+            sy = 0.50 + radius_y * math.sin(angle) * 1.3
+            node_positions[s] = (round(sx, 2), round(sy, 2))
+
+        # Position hosts radiating outwards from their parent switch
+        for h in sorted(hosts):
+            parent_sw = get_host_switch(h)
+            psx, psy = node_positions[parent_sw]
+            vx = psx - 0.50
+            vy = psy - 0.50
+            mag = math.hypot(vx, vy) or 1.0
+            hx = 0.50 + (vx / mag) * 0.44
+            hy = 0.50 + (vy / mag) * 0.38
+            node_positions[h] = (round(max(0.08, min(0.92, hx)), 2), round(max(0.12, min(0.88, hy)), 2))
+        return node_positions
+
+    # 4. Mesh Topology: 4-corner box with cross diagonals
+    if topo_type == "mesh":
+        node_positions["s1"] = (0.35, 0.32)
+        node_positions["s2"] = (0.65, 0.32)
+        node_positions["s3"] = (0.35, 0.68)
+        node_positions["s4"] = (0.65, 0.68)
+        node_positions["h1"] = (0.10, 0.28)
+        node_positions["h3"] = (0.10, 0.72)
+        node_positions["h2"] = (0.90, 0.28)
+        node_positions["h4"] = (0.90, 0.72)
+        return node_positions
+
+    # 5. Canonical Diamond Topology
+    if topo_type == "diamond" or (sw_set == {"s1", "s2", "s3", "s4"} and set(hosts) == {"h1", "h2", "h3", "h4"}):
         return {
             "h1": (0.08, 0.28),
             "h3": (0.08, 0.72),
@@ -35,73 +123,7 @@ def compute_topology_layout(
             "h4": (0.92, 0.72),
         }
 
-    # 2. Star Topology: single central switch with peripheral nodes
-    if len(switches) == 1 and hosts:
-        center_sw = switches[0]
-        node_positions[center_sw] = (0.50, 0.50)
-        n = len(hosts)
-        for i, h in enumerate(hosts):
-            angle = (2.0 * math.pi * i) / n - (math.pi / 2.0)
-            radius = 0.36
-            x = 0.50 + radius * math.cos(angle)
-            y = 0.50 + radius * math.sin(angle)
-            node_positions[h] = (round(x, 2), round(y, 2))
-        return node_positions
-
-    # 3. Ring Topology: circular layout for switches, hosts positioned outward
-    if topology_type == "ring" or (len(switches) >= 3 and len(edges) >= len(switches)):
-        n_sw = len(switches)
-        radius_sw = 0.28
-        sw_angles: Dict[str, float] = {}
-        for i, s in enumerate(switches):
-            angle = (2.0 * math.pi * i) / n_sw - (math.pi / 2.0)
-            sw_angles[s] = angle
-            x = 0.50 + radius_sw * math.cos(angle)
-            y = 0.50 + radius_sw * math.sin(angle)
-            node_positions[s] = (round(x, 2), round(y, 2))
-
-        # Position hosts radiating outside their connected switch
-        host_count_per_sw: Dict[str, int] = {}
-        for h in hosts:
-            # find connected switch
-            target_sw = switches[0]
-            for u, v in edges:
-                if u == h and v in sw_set:
-                    target_sw = v
-                    break
-                elif v == h and u in sw_set:
-                    target_sw = u
-                    break
-            idx = host_count_per_sw.get(target_sw, 0)
-            host_count_per_sw[target_sw] = idx + 1
-            sw_ang = sw_angles.get(target_sw, 0.0)
-            h_ang = sw_ang + (idx * 0.25 - 0.12)
-            h_radius = 0.42
-            hx = 0.50 + h_radius * math.cos(h_ang)
-            hy = 0.50 + h_radius * math.sin(h_ang)
-            node_positions[h] = (round(max(0.08, min(0.92, hx)), 2), round(max(0.12, min(0.88, hy)), 2))
-        return node_positions
-
-    # 4. Bus / Linear Backbone Topology
-    if topology_type == "bus" or (len(switches) >= 2 and all(s.startswith("s") for s in switches)):
-        # Order switches linearly
-        ordered_switches = sorted(switches)
-        n_sw = len(ordered_switches)
-        step_x = 0.70 / max(1, (n_sw - 1)) if n_sw > 1 else 0.5
-        for i, s in enumerate(ordered_switches):
-            sx = 0.15 + i * step_x
-            node_positions[s] = (round(sx, 2), 0.50)
-
-        # Hosts alternated above and below backbone
-        for i, h in enumerate(sorted(hosts)):
-            # find closest switch
-            assigned_sw = ordered_switches[i % n_sw]
-            sx, _ = node_positions[assigned_sw]
-            sy = 0.22 if (i % 2 == 0) else 0.78
-            node_positions[h] = (round(sx, 2), sy)
-        return node_positions
-
-    # 5. General Fallback: NetworkX Force-Directed Spring Layout
+    # 6. General Fallback: NetworkX Force-Directed Spring Layout
     G = nx.Graph()
     for s in switches:
         G.add_node(s, node_type="switch")
@@ -111,7 +133,6 @@ def compute_topology_layout(
         G.add_edge(u, v)
 
     raw_pos = nx.spring_layout(G, seed=42, iterations=80)
-    # Normalize coordinates into [0.10, 0.90] x [0.15, 0.85]
     xs = [coord[0] for coord in raw_pos.values()]
     ys = [coord[1] for coord in raw_pos.values()]
     min_x, max_x = min(xs), max(xs)
