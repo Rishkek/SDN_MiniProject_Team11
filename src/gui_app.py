@@ -1892,7 +1892,7 @@ class MasterSDNGUI(QMainWindow):
         act_load_topo = QAction("📂 &Load Network Topology (.json)...", self)
         act_load_topo.setShortcut("Ctrl+O")
         act_load_topo.setStatusTip("Open and load a network topology definition file")
-        act_load_topo.triggered.connect(self.canvas._open_topology_file_dialog)
+        act_load_topo.triggered.connect(self._open_topology_dialog)
         menu_file.addAction(act_load_topo)
 
         act_term = QAction("🖥 Launch External OS Terminal Monitor (CMD)", self)
@@ -1933,6 +1933,11 @@ class MasterSDNGUI(QMainWindow):
         act_bench = QAction("📊 Run Automated Comparative Benchmark", self)
         act_bench.triggered.connect(lambda: self.bench_widget.start_benchmark())
         menu_sim.addAction(act_bench)
+
+    def _open_topology_dialog(self):
+        """Dispatches open topology dialog to the canvas widget."""
+        if hasattr(self, "topo_canvas") and self.topo_canvas:
+            self.topo_canvas._open_topology_file_dialog()
 
     def _init_header_bar(self):
         header_widget = QWidget()
