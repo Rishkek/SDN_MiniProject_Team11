@@ -1782,6 +1782,10 @@ class MasterSDNGUI(QMainWindow):
         act_term.triggered.connect(self._launch_external_terminal)
         menu_file.addAction(act_term)
 
+        act_editor = QAction("🎨 Launch TopoEditor (Network Topology Editor)...", self)
+        act_editor.triggered.connect(self._launch_topo_editor)
+        menu_file.addAction(act_editor)
+
         act_reset = QAction("🔄 Reset Network Topology", self)
         act_reset.triggered.connect(self._reset_topology)
         menu_file.addAction(act_reset)
@@ -2212,6 +2216,12 @@ class MasterSDNGUI(QMainWindow):
 
     def _launch_external_terminal(self):
         self.console_widget._launch_external_terminal()
+
+    def _launch_topo_editor(self):
+        """Launches TopoEditor companion topology editor."""
+        import subprocess, sys
+        editor_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "run_topo_editor.py")
+        subprocess.Popen([sys.executable, editor_path])
 
     def _on_cable_a_bw_changed(self, val):
         self.lbl_val_bw_a.setText(f"{val}.0 Mbps")
