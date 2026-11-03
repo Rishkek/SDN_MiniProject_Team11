@@ -72,9 +72,10 @@ class TopologyDefinition:
             return float(node["x"]), float(node["y"])
         return default
 
-    def get_path(self, path_key: str) -> Optional[Dict[str, Any]]:
+    def get_path(self, path_key: str, default: Any = None) -> Any:
         """Retrieves path specification by key ('path_a', 'path_b')."""
-        return self.paths.get(path_key)
+        val = self.paths.get(path_key)
+        return val if val is not None else default
 
     def to_dict(self) -> Dict[str, Any]:
         """Exports definition back to serializable dictionary."""

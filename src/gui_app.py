@@ -219,6 +219,9 @@ class AnimatedTopologyCanvas(QWidget):
             if hasattr(parent_win, "on_topology_loaded"):
                 parent_win.on_topology_loaded(topo)
 
+            path_a_info = topo.get_path("path_a") or {}
+            path_b_info = topo.get_path("path_b") or {}
+
             QMessageBox.information(
                 self,
                 "Topology Loaded",
@@ -226,8 +229,8 @@ class AnimatedTopologyCanvas(QWidget):
                 f"• Switches: {len(topo.switches)}\n"
                 f"• Hosts: {len(topo.hosts)}\n"
                 f"• Links: {len(topo.links)}\n"
-                f"• Primary Path: {topo.get_path('path_a', {}).get('name', 'Path A')}\n"
-                f"• Alternate Path: {topo.get_path('path_b', {}).get('name', 'Path B')}"
+                f"• Primary Path: {path_a_info.get('name', 'Path A')}\n"
+                f"• Alternate Path: {path_b_info.get('name', 'N/A')}"
             )
         except Exception as e:
             QMessageBox.critical(
