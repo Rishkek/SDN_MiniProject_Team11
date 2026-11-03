@@ -1,0 +1,63 @@
+include lib.machine
+include lib.wire
+include lib.data
+# Device Definitions
+define &main_sender   machine.host.sender
+define &main_receiver machine.host.receiver
+define &cross_sender  machine.host.sender
+define &cross_sink    machine.host.receiver
+define &ingress machine.switch --unique
+define &egress  machine.switch --unique
+define &switch  machine.switch --common
+define &cable wire --common
+# Cable Profiles
+detail cable:
+    instance edge_cable
+    instance path_a_cable
+    instance path_b_cable
+    detail edge_cable:
+        data.flow(rate, 100@mega);
+        data.delay(lat, 1@milli);
+        data.buffer(q, 1000);
+    detail path_a_cable:
+        data.flow(rate, 10@mega);
+        data.delay(lat, 5@milli);
+        data.buffer(q, 100);
+    detail path_b_cable:
+        data.flow(rate, 10@mega);
+        data.delay(lat, 15@milli);
+        data.buffer(q, 100);
+# Topology Layout & Interconnects
+detail machine.topology.layout:
+    machine bundle[16];
+    __SPAWNS__ {
+        spawn main_sender   alias h1;
+        spawn main_receiver alias h2;
+        spawn cross_sender  alias h3;
+        spawn cross_sink    alias h4;
+        spawn ingress alias s1;
+        spawn switch  alias s2;
+        spawn switch  alias s3;
+        spawn egress  alias s4;
+        spawn cable.edge_cable   4 alias edge;
+        spawn cable.path_a_cable 2 alias c_a;
+        spawn cable.path_b_cable 2 alias c_b;
+    }@bundle #padding=0
+    __CONNECTIONS__ {
+        unpack bundle;
+        connect_multi {
+            # Host edge links
+            (h1, edge, s1);
+            (h3, edge, s1);
+            (s4, edge, h2);
+            (s4, edge, h4);
+            # Path A (Primary bottleneck)
+            (s1, c_a, s2);
+            (s2, c_a, s4);
+            # Path B (Alternate bottleneck)
+            (s1, c_b, s3);
+            (s3, c_b, s4);
+        }
+    }
+deploy:
+    machine.topology.layout;

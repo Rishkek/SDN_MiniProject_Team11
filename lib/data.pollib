@@ -1,0 +1,30 @@
+# ==========================================
+# DATA LIBRARY
+# Defines data sizes and data operations
+# ==========================================
+
+# ---------- DATA SIZE DEFINITIONS ----------
+
+@bit  = 1
+@byte = 8
+
+@kilo = 1024
+@mega = 1024@kilo
+@giga = 1024@mega
+
+@milli = 1
+@sec   = 1000@milli
+
+# ---------- DATA OPERATIONS ----------
+
+# data.define(variable, value)
+# Assigns a value to a data variable.
+
+# data.in(variable, value)
+# Configures incoming data.
+
+# data.out(variable, value)
+# Configures outgoing data.
+
+# data.flow(variable, value)
+# Configures bidirectional data flow.

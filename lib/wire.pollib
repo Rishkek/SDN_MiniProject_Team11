@@ -1,0 +1,15 @@
+# ==========================================
+# WIRE LIBRARY
+# Defines physical link profiles and queues
+# ==========================================
+
+define wire
+
+detail wire:
+    data rate;
+    data delay;
+    data queue;
+
+    wire::field.rate("any") = rate;
+    wire::field.delay = delay;
+    wire::field.queue = queue;

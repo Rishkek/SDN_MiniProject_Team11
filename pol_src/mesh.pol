@@ -1,0 +1,83 @@
+include lib.machine
+include lib.wire
+include lib.data
+
+define &sender machine.host.sender
+define &reciever machine.host.reciever
+define &ingress machine.switch --unique
+define &egress machine.switch --unique
+define &switch machine.switch --common
+define &cable wire --common
+
+grid OFF
+
+
+detail sender:
+    data send_rate;
+    data.out(send_rate, 100@kilo);
+    sender::field.rate("out") = send_rate;
+
+detail reciever:
+    data recieve_rate;
+    data.in(recieve_rate, 300@kilo);
+    reciever::field.rate("in") = recieve_rate;
+
+detail cable:
+    instance high_speed
+    instance medium
+    instance low_speed
+
+    data rate;
+
+    detail high_speed:
+        data.flow(rate, 100@mega);
+        high_speed::field.rate("any") = rate;
+
+    detail medium:
+        data.flow(rate, 10@mega);
+        medium::field.rate("any") = rate;
+
+    detail low_speed:
+        data.flow(rate, 5@mega);
+        low_speed::field.rate("any") = rate;
+
+
+detail machine.topology.layout:
+
+    machine bundle[16];
+
+    __SPAWNS__ {
+        spawn cable.high_speed 4 alias hi;
+        spawn cable.medium 5 alias med;
+        spawn cable.low_speed 2 alias lo;
+        spawn ingress alias s1;
+        spawn switch alias s2;
+        spawn switch alias s3;
+        spawn egress alias s4;
+        spawn sender alias h1;
+        spawn reciever alias h2;
+        spawn sender alias h3;
+        spawn reciever alias h4;
+    }@bundle #padding=0
+
+
+    __CONNECTIONS__ {
+        unpack bundle;
+
+        connect_multi {
+            (h1, hi, s1);
+            (h3, hi, s1);
+            (s1, med, s2);
+            (s1, med, s3);
+            (s1, lo, s4);
+            (s2, med, s3);
+            (s2, med, s4);
+            (s3, med, s4);
+            (s4, hi, h2);
+            (s4, hi, h4);
+        }
+    }
+
+
+deploy:
+    machine.topology.layout;

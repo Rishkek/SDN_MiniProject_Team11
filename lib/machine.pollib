@@ -1,0 +1,50 @@
+# ==========================================
+# MACHINE LIBRARY
+# Defines hosts, switches and their properties
+# ==========================================
+
+define machine.host
+define machine.switch
+
+# ---------- HOST TYPES ----------
+
+define machine.host.sender
+define machine.host.reciever
+define machine.host.receiver
+
+detail machine.host:
+    data ip;
+    data mac;
+
+    data.define(ip, "0.0.0.0");
+    data.define(mac, "00:00:00:00:00:00");
+
+detail machine.host.sender:
+    data send_rate;
+    data.out(send_rate, 0@kilo);
+
+    machine.host::field.rate("out") = send_rate;
+
+detail machine.host.reciever:
+    data recieve_rate;
+    data.in(recieve_rate, 0@kilo);
+
+    machine.host::field.rate("in") = recieve_rate;
+
+detail machine.host.receiver:
+    data receive_rate;
+    data.in(receive_rate, 0@kilo);
+
+    machine.host::field.rate("in") = receive_rate;
+
+# ---------- SWITCH TYPE ----------
+
+detail machine.switch:
+    data ports_in;
+    data ports_out;
+
+    data.define(ports_in, 1);
+    data.define(ports_out, 1);
+
+    machine.switch::ports("in") = ports_in;
+    machine.switch::ports("out") = ports_out;
