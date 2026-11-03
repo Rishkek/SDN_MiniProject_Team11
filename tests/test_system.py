@@ -368,24 +368,26 @@ def test_l_cleanup_and_reproducibility():
 
 
 # ---------------------------------------------------------------------------
-# Test M: Topologia (.toponet) Loader & Dynamic TopologyHandler
+# Test M: Standard JSON (.json) Topology Loader & Dynamic TopologyHandler
 # ---------------------------------------------------------------------------
-def test_m_toponet_loader_and_topology_handler():
-    """Verify .toponet file validation, loading, and dynamic cable/sender control via TopologyHandler."""
+def test_m_json_topology_loader_and_topology_handler():
+    """Verify standard .json topology validation, loading, and dynamic cable/sender control via TopologyHandler."""
     from src.topology_loader import (
-        get_default_topology, load_topology, validate_tp_extension,
+        get_default_topology, load_topology, validate_topology_extension,
         InvalidTopologyExtensionError, TOPOLOGY_FILE_EXTENSION
     )
     from src.topology_handler import TopologyHandler
 
-    # 1. Extension validation: must accept .toponet and reject legacy .tp or others
-    validate_tp_extension("custom.toponet")
+    # 1. Extension validation: must accept .json and reject non-.json files
+    validate_topology_extension("custom.json")
     with pytest.raises(InvalidTopologyExtensionError):
-        validate_tp_extension("video.tp")
+        validate_topology_extension("video.tp")
     with pytest.raises(InvalidTopologyExtensionError):
-        validate_tp_extension("network.json")
+        validate_topology_extension("network.toponet")
+    with pytest.raises(InvalidTopologyExtensionError):
+        validate_topology_extension("topology.xml")
 
-    # 2. Load diamond.toponet
+    # 2. Load diamond.json
     topo = get_default_topology()
     assert topo is not None
     assert len(topo.switches) == 4

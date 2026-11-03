@@ -1,5 +1,5 @@
 {
-  "format": "topologia-network",
+  "format": "network-topology",
   "version": "1.0",
   "topology_name": "Diamond Multi-Path SDN Topology",
   "description": "Standard 4-switch diamond topology with S1 ingress, S2 primary path, S3 alternate path, S4 egress, and 4 endpoint hosts.",

@@ -20,7 +20,7 @@
 | **`src/sdn_controller.py`** | Centralized OpenFlow 1.3 controller and congestion telemetry engine. Polls ... | 12 |
 | **`src/ryu_controller.py`** | Standard Ryu OpenFlow 1.3 controller application. Implements event-driven h... | 7 |
 | **`src/topology_handler.py`** | Dynamic topology interaction manager. Coordinates cable bottlenecks, senders, and sidebar controls. | 10 |
-| **`src/topology_loader.py`** | Topology loader engine for Topologia (.toponet) files. Validates extensions and loads schemas. | 13 |
+| **`src/topology_loader.py`** | Topology loader engine for JSON (.json) files. Validates extensions and loads schemas. | 13 |
 | **`src/benchmark.py`** | Automated comparative benchmark test suite. Executes experiments across Sta... | 3 |
 | **`src/gui_app.py`** | Comprehensive PyQt5 / PyQtGraph GUI application. Implements animated topolo... | 69 |
 
@@ -718,7 +718,7 @@
 ## 10. `src/topology_loader.py`
 
 > **File Description:**  
-> Topology loader engine for Topologia (.toponet) files. Validates .toponet extensions, parses JSON topology schemas, converts definitions to Mininet Topo instances, and configures emulator links and canvas layouts.
+> Topology loader engine for JSON (.json) files. Validates .json extensions, parses JSON topology schemas, converts definitions to Mininet Topo instances, and configures emulator links and canvas layouts.
 
 ### Functions & Methods (13 documented)
 
@@ -726,7 +726,7 @@
 | [CLASS EXCEPTION] InvalidTopologyExtensionError
 | Signature: class InvalidTopologyExtensionError(ValueError)
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Custom exception raised when attempting to load a topology file that does not have the mandatory '.toponet' extension.
+  - **Purpose:** Custom exception raised when attempting to load a topology file that does not have the mandatory '.json' extension.
   - **Inputs:** Message string describing the invalid extension.
   - **Outputs:** Exception instance.
 
@@ -734,7 +734,7 @@
 | [CLASS EXCEPTION] CorruptTopologyFileError
 | Signature: class CorruptTopologyFileError(ValueError)
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Custom exception raised when a .toponet file contains invalid JSON or is missing essential topology schema fields (switches, hosts, links).
+  - **Purpose:** Custom exception raised when a .json file contains invalid JSON or is missing essential topology schema fields (switches, hosts, links).
   - **Inputs:** Message string describing corrupt data or missing field.
   - **Outputs:** Exception instance.
 
@@ -742,7 +742,7 @@
 | [METHOD] TopologyDefinition.__init__
 | Signature: TopologyDefinition.__init__(data: Dict[str, Any], filepath: str = '')
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Parses and structures .toponet topology dictionary: extracts format, version, topology_name, description, switches, hosts, links, paths, traffic_profile, and sdn_policy. Builds fast lookup node map.
+  - **Purpose:** Parses and structures .json topology dictionary: extracts format, version, topology_name, description, switches, hosts, links, paths, traffic_profile, and sdn_policy. Builds fast lookup node map.
   - **Inputs:** data (dict): Raw parsed JSON dictionary; filepath (str): Source file path.
   - **Outputs:** TopologyDefinition instance.
 
@@ -814,15 +814,15 @@
 | [FUNCTION] get_default_topology_path
 | Signature: get_default_topology_path() -> str
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Locates the default diamond.toponet file in workspace root or source directories.
+  - **Purpose:** Locates the default diamond.json file in workspace root or source directories.
   - **Inputs:** None.
-  - **Outputs:** str: Resolved path to diamond.toponet.
+  - **Outputs:** str: Resolved path to diamond.json.
 
 +--------------------------------------------------------------------------------+
 | [FUNCTION] get_default_topology
 | Signature: get_default_topology() -> TopologyDefinition
 +--------------------------------------------------------------------------------+
-  - **Purpose:** Loads and returns the default diamond topology from diamond.toponet.
+  - **Purpose:** Loads and returns the default diamond topology from diamond.json.
   - **Inputs:** None.
   - **Outputs:** TopologyDefinition: Default diamond topology definition.
 

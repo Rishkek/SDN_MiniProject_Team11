@@ -150,16 +150,16 @@ class AnimatedTopologyCanvas(QWidget):
         self._dot_color_main = QColor("#89b4fa")
         self._dot_color_cross = QColor("#f38ba8")
 
-        # Load default diamond.toponet topology
+        # Load default diamond.json topology
         try:
             self.topo_def = get_default_topology()
         except Exception:
             self.topo_def = None
 
-        # Top-Right (+load topology) button for Topologia (.toponet) file loading
+        # Top-Right (+load topology) button for JSON (.json) file loading
         self.btn_load_topo = QPushButton("(+load topology)", self)
         self.btn_load_topo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_load_topo.setToolTip(f"Open Topologia ({TOPOLOGY_FILE_EXTENSION}) network topology file in file explorer")
+        self.btn_load_topo.setToolTip(f"Open network topology file (*{TOPOLOGY_FILE_EXTENSION}) in file explorer")
         self.btn_load_topo.setStyleSheet("""
             QPushButton {
                 background-color: #313244;
@@ -191,12 +191,12 @@ class AnimatedTopologyCanvas(QWidget):
             self.btn_load_topo.raise_()
 
     def _open_topology_file_dialog(self):
-        """Opens file explorer to choose and load a Topologia (.toponet) topology file."""
+        """Opens file explorer to choose and load a topology (.json) file."""
         filepath, _ = QFileDialog.getOpenFileName(
             self,
-            f"Open Topologia Network File (*{TOPOLOGY_FILE_EXTENSION})",
+            f"Open Topology File (*{TOPOLOGY_FILE_EXTENSION})",
             os.getcwd(),
-            f"Topologia Network (*{TOPOLOGY_FILE_EXTENSION});;All Files (*)"
+            f"Topology JSON (*{TOPOLOGY_FILE_EXTENSION});;All Files (*)"
         )
         if not filepath:
             return
@@ -205,7 +205,7 @@ class AnimatedTopologyCanvas(QWidget):
             QMessageBox.warning(
                 self,
                 "Invalid Topology Extension",
-                f"Only files with a '{TOPOLOGY_FILE_EXTENSION}' extension are supported by the Topologia loader.\n\n"
+                f"Only files with a '{TOPOLOGY_FILE_EXTENSION}' extension are supported by the topology loader.\n\n"
                 f"Selected file: {os.path.basename(filepath)}"
             )
             return
@@ -1782,10 +1782,6 @@ class MasterSDNGUI(QMainWindow):
         act_term.triggered.connect(self._launch_external_terminal)
         menu_file.addAction(act_term)
 
-        act_editor = QAction("🎨 Launch TopoEditor (Network Topology Editor)...", self)
-        act_editor.triggered.connect(self._launch_topo_editor)
-        menu_file.addAction(act_editor)
-
         act_reset = QAction("🔄 Reset Network Topology", self)
         act_reset.triggered.connect(self._reset_topology)
         menu_file.addAction(act_reset)
@@ -2217,12 +2213,6 @@ class MasterSDNGUI(QMainWindow):
     def _launch_external_terminal(self):
         self.console_widget._launch_external_terminal()
 
-    def _launch_topo_editor(self):
-        """Launches TopoEditor companion topology editor."""
-        import subprocess, sys
-        editor_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "run_topo_editor.py")
-        subprocess.Popen([sys.executable, editor_path])
-
     def _on_cable_a_bw_changed(self, val):
         self.lbl_val_bw_a.setText(f"{val}.0 Mbps")
         if hasattr(self, "topo_handler"):
@@ -2431,7 +2421,7 @@ class MasterSDNGUI(QMainWindow):
         )
 
     def on_topology_loaded(self, topo):
-        """Callback triggered when user loads a Topologia (.toponet) file via the (+load topology) button."""
+        """Callback triggered when user loads a topology (.json) file via the (+load topology) button."""
         if hasattr(self, "topo_handler"):
             self.topo_handler.load_from_definition(topo)
 
@@ -2467,7 +2457,7 @@ class MasterSDNGUI(QMainWindow):
             self.slider_cross_rate.setValue(int(cross_s.rate_mbps))
             self.lbl_val_cross.setText(f"{cross_s.rate_mbps:.1f} Mbps")
 
-        self.statusBar().showMessage(f"Topologia loaded: {topo.name} ({os.path.basename(topo.filepath)})", 6000)
+        self.statusBar().showMessage(f"Topology loaded: {topo.name} ({os.path.basename(topo.filepath)})", 6000)
 
     def closeEvent(self, event):
         self.timer.stop()

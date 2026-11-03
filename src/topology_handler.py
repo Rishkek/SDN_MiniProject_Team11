@@ -4,7 +4,7 @@ Topic 27: Congestion Detection and Dynamic Traffic Rerouting.
 
 Manages how every element of the network topology (cables/links, bottlenecks,
 senders, queues) reacts in real-time to administrative controls and SDN rerouting.
-Bridges the loaded TopologyDefinition (.toponet), NetworkEmulator, senders,
+Bridges the loaded TopologyDefinition (.json), NetworkEmulator, senders,
 and GUI sidebar controls.
 """
 

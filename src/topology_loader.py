@@ -1,9 +1,9 @@
 """
-Topology Loader Engine for Topologia (.toponet) Files.
+Topology Loader Engine for JSON (.json) Files.
 Topic 27: SDN-Socket Programming & Custom Network Topology Loading.
 
-Supports loading, validating, and translating custom .toponet topology files
-exported by Topologia for use in emulation, visualization, and Mininet.
+Supports loading, validating, and translating standard .json topology files
+for use in emulation, visualization, and Mininet.
 """
 
 import os
@@ -15,22 +15,22 @@ from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger("TopologyLoader")
 
-TOPOLOGY_FILE_EXTENSION = ".toponet"
+TOPOLOGY_FILE_EXTENSION = ".json"
 
 
 class InvalidTopologyExtensionError(ValueError):
-    """Raised when an attempt is made to load a file without the required .toponet extension."""
+    """Raised when an attempt is made to load a file without the required .json extension."""
     pass
 
 
 class CorruptTopologyFileError(ValueError):
-    """Raised when a .toponet file is unreadable, malformed, or missing required topology schema."""
+    """Raised when a .json file is unreadable, malformed, or missing required topology schema."""
     pass
 
 
 class TopologyDefinition:
     """
-    Structured representation of a parsed .toponet network topology.
+    Structured representation of a parsed .json network topology.
     Encapsulates switches, hosts, links, path routing constraints,
     visualization coordinates, and SDN policies.
     """
@@ -38,7 +38,7 @@ class TopologyDefinition:
     def __init__(self, data: Dict[str, Any], filepath: str = ""):
         self.raw_data = data
         self.filepath = filepath
-        self.format = data.get("format", "topologia-network")
+        self.format = data.get("format", "network-topology")
         self.version = data.get("version", "1.0")
         self.name = data.get("topology_name", "Custom Topology")
         self.description = data.get("description", "")
@@ -82,7 +82,7 @@ class TopologyDefinition:
 
     def build_mininet_topo(self):
         """
-        Dynamically constructs a Mininet Topo subclass using the .toponet definition.
+        Dynamically constructs a Mininet Topo subclass using the .json definition.
         Returns Topo instance if Mininet is installed, otherwise None.
         """
         try:
@@ -119,10 +119,9 @@ class TopologyDefinition:
         return DynamicLoadedTopo()
 
 
-def validate_tp_extension(filepath: str):
+def validate_topology_extension(filepath: str):
     """
-    Enforces that the specified path ends with the required .toponet extension.
-    Accepts .toponet.
+    Enforces that the specified path ends with the required .json extension.
     """
     if not filepath or not filepath.lower().endswith(TOPOLOGY_FILE_EXTENSION):
         _, ext = os.path.splitext(filepath)
@@ -131,22 +130,26 @@ def validate_tp_extension(filepath: str):
         )
 
 
+# Backward compatibility alias
+validate_tp_extension = validate_topology_extension
+
+
 def load_topology(filepath: str) -> TopologyDefinition:
     """
-    Loads and validates a .toponet topology definition file.
+    Loads and validates a .json topology definition file.
 
     Parameters:
-      filepath (str): Absolute or relative path to a .toponet file.
+      filepath (str): Absolute or relative path to a .json file.
 
     Returns:
       TopologyDefinition: Parsed and validated topology object.
 
     Raises:
-      InvalidTopologyExtensionError: If filename does not end in .toponet.
+      InvalidTopologyExtensionError: If filename does not end in .json.
       FileNotFoundError: If file cannot be found.
       CorruptTopologyFileError: If JSON parsing fails or required fields are missing.
     """
-    validate_tp_extension(filepath)
+    validate_topology_extension(filepath)
 
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Topology file not found: {filepath}")
@@ -155,20 +158,20 @@ def load_topology(filepath: str) -> TopologyDefinition:
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
-        raise CorruptTopologyFileError(f"Failed to parse .toponet file as JSON: {e}")
+        raise CorruptTopologyFileError(f"Failed to parse .json file as JSON: {e}")
 
     # Validate essential schema
     if not isinstance(data, dict):
-        raise CorruptTopologyFileError("Topologia (.toponet) file must be a JSON object.")
+        raise CorruptTopologyFileError("Topology (.json) file must be a JSON object.")
 
     if "switches" not in data or not isinstance(data["switches"], list):
-        raise CorruptTopologyFileError("Invalid .toponet schema: missing 'switches' list.")
+        raise CorruptTopologyFileError("Invalid .json schema: missing 'switches' list.")
 
     if "hosts" not in data or not isinstance(data["hosts"], list):
-        raise CorruptTopologyFileError("Invalid .toponet schema: missing 'hosts' list.")
+        raise CorruptTopologyFileError("Invalid .json schema: missing 'hosts' list.")
 
     if "links" not in data or not isinstance(data["links"], list):
-        raise CorruptTopologyFileError("Invalid .toponet schema: missing 'links' list.")
+        raise CorruptTopologyFileError("Invalid .json schema: missing 'links' list.")
 
     topo = TopologyDefinition(data, filepath=os.path.abspath(filepath))
     logger.info(
@@ -179,36 +182,36 @@ def load_topology(filepath: str) -> TopologyDefinition:
 
 
 def save_topology(topo_def: TopologyDefinition, filepath: str):
-    """Saves a TopologyDefinition object to a .toponet file."""
-    validate_tp_extension(filepath)
+    """Saves a TopologyDefinition object to a .json file."""
+    validate_topology_extension(filepath)
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(topo_def.to_dict(), f, indent=2)
     logger.info(f"Saved topology '{topo_def.name}' to {filepath}")
 
 
 def get_default_topology_path() -> str:
-    """Finds the default diamond.toponet file path in workspace or source directories."""
+    """Finds the default diamond.json file path in workspace or source directories."""
     candidates = [
-        "diamond.toponet",
-        os.path.join(os.path.dirname(__file__), "..", "diamond.toponet"),
-        os.path.join(os.path.dirname(__file__), "diamond.toponet"),
+        "diamond.json",
+        os.path.join(os.path.dirname(__file__), "..", "diamond.json"),
+        os.path.join(os.path.dirname(__file__), "diamond.json"),
     ]
     for c in candidates:
         if os.path.exists(c):
             return os.path.abspath(c)
-    return "diamond.toponet"
+    return "diamond.json"
 
 
 def get_default_topology() -> TopologyDefinition:
-    """Loads default diamond topology from diamond.toponet."""
+    """Loads default diamond topology from diamond.json."""
     path = get_default_topology_path()
     if os.path.exists(path):
         return load_topology(path)
-    raise FileNotFoundError(f"Default diamond.toponet not found at {path}")
+    raise FileNotFoundError(f"Default diamond.json not found at {path}")
 
 
 def run_mininet_cli(tp_path: str = ""):
-    """Runs Mininet environment using loaded .toponet topology file on Linux."""
+    """Runs Mininet environment using loaded .json topology file on Linux."""
     try:
         from mininet.net import Mininet
         from mininet.node import OVSKernelSwitch
@@ -236,8 +239,8 @@ def run_mininet_cli(tp_path: str = ""):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Topologia (.toponet) Topology Loader & Mininet CLI")
-    parser.add_argument("file", nargs="?", default="", help="Path to .toponet topology file")
+    parser = argparse.ArgumentParser(description="Topology (.json) Loader & Mininet CLI")
+    parser.add_argument("file", nargs="?", default="", help="Path to .json topology file")
     parser.add_argument("--cli", action="store_true", help="Launch interactive Mininet CLI on Linux")
     args = parser.parse_args()
 

@@ -179,7 +179,7 @@ D1: Initial Deliverables (15 Marks)
             - src/udp_sender.py: High-precision rate pacing & sequence tracking.
             - src/udp_receiver.py: Sequence checking, RFC 3550 jitter, latency.
   [4 Marks] Mininet + SDN Implementation:
-            - src/topology_loader.py: Custom .toponet loader with Mininet translation.
+            - src/topology_loader.py: Custom JSON (.json) topology loader with Mininet translation.
             - src/sdn_controller.py: OpenFlow 1.3 FlowMod dispatcher.
             - src/ryu_controller.py: Ryu OpenFlow 1.3 controller application.
   [3 Marks] Socket-SDN Integration:
@@ -218,12 +218,11 @@ def interactive_menu():
         print("  [5] Run UDP Receiver Tool Manually")
         print("  [6] Run Cross-Traffic Congestion Injector Manually")
         print("  [7] Run Automated Unit & System Test Suite")
-        print("  [8] Launch TopoEditor (Network Topology Designer)")
-        print("  [9] View Project Architecture & Rubric Mapping")
-        print("  [10] Exit")
+        print("  [8] View Project Architecture & Rubric Mapping")
+        print("  [9] Exit")
         print("-" * 65)
 
-        choice = input("Enter choice [1-10]: ").strip()
+        choice = input("Enter choice [1-9]: ").strip()
         if choice == "1":
             run_interactive_demo()
         elif choice == "2":
@@ -255,14 +254,12 @@ def interactive_menu():
         elif choice == "7":
             run_test_suite()
         elif choice == "8":
-            launch_topo_editor()
-        elif choice == "9":
             show_rubric_mapping()
-        elif choice == "10":
+        elif choice == "9":
             print("\nExiting. Thank you!")
             break
         else:
-            print("[!] Invalid option. Please select 1-10.")
+            print("[!] Invalid option. Please select 1-9.")
 
         input("\nPress Enter to return to main menu...")
 
@@ -316,20 +313,9 @@ def launch_gui_dashboard():
         interactive_menu()
 
 
-def launch_topo_editor():
-    """Launches TopoEditor companion topology editor."""
-    try:
-        from topo_editor.main import main as run_editor
-        print("[+] Launching TopoEditor (Network Topology Designer)...")
-        run_editor()
-    except Exception as e:
-        print(f"[!] Could not launch TopoEditor: {e}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="SDN Congestion Detection and Dynamic Rerouting Launcher")
     parser.add_argument("--gui", action="store_true", help="Launch PyQt6 Graphical User Interface (Default)")
-    parser.add_argument("--editor", action="store_true", help="Launch TopoEditor network topology designer")
     parser.add_argument("--cli", action="store_true", help="Launch interactive CLI menu instead of GUI")
     parser.add_argument("--demo", action="store_true", help="Run interactive dynamic rerouting terminal demo")
     parser.add_argument("--monitor", action="store_true", help="Launch real-time packet stream terminal monitor")
@@ -338,9 +324,7 @@ def main():
     parser.add_argument("--test", action="store_true", help="Run test suite")
     args = parser.parse_args()
 
-    if args.editor:
-        launch_topo_editor()
-    elif args.cli:
+    if args.cli:
         interactive_menu()
     elif args.monitor:
         run_packet_monitor()
