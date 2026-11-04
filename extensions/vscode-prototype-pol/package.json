@@ -1,0 +1,119 @@
+{
+  "name": "prototypelanguage",
+  "displayName": "Prototype.pol Language Support",
+  "description": "Syntax highlighting, code snippets, and language support for Prototype.pol network topologies (.pol) and libraries (.pollib).",
+  "version": "0.1.0",
+  "publisher": "rishkek",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rishkek/SDN_MiniProject_Team11.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "prototype.pol",
+    "pol",
+    "pollib",
+    "sdn",
+    "topology",
+    "network"
+  ],
+  "activationEvents": [
+    "onLanguage:prototype-pol",
+    "onLanguage:prototype-pollib"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "prototype-pol",
+        "aliases": [
+          "Prototype.pol",
+          "prototype-pol",
+          "pol"
+        ],
+        "extensions": [
+          ".pol"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "prototype-pollib",
+        "aliases": [
+          "Prototype.pol Library",
+          "prototype-pollib",
+          "pollib"
+        ],
+        "extensions": [
+          ".pollib"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "prototype-pol",
+        "scopeName": "source.pol",
+        "path": "./syntaxes/prototype.tmLanguage.json"
+      },
+      {
+        "language": "prototype-pollib",
+        "scopeName": "source.pol",
+        "path": "./syntaxes/prototype.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "prototype-pol",
+        "path": "./snippets/prototype.json"
+      },
+      {
+        "language": "prototype-pollib",
+        "path": "./snippets/prototype.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "prototype.compileCurrentFile",
+        "title": "Prototype.pol: Compile Current File",
+        "category": "Prototype.pol"
+      },
+      {
+        "command": "prototype.checkCurrentFile",
+        "title": "Prototype.pol: Check Current File",
+        "category": "Prototype.pol"
+      }
+    ],
+    "configuration": {
+      "title": "Prototype.pol",
+      "properties": {
+        "prototype.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the polc.py compiler script or compiler executable."
+        },
+        "prototype.outputDirectory": {
+          "type": "string",
+          "default": "topology_src",
+          "description": "Destination directory for compiled JSON topologies."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.3.3"
+  }
+}

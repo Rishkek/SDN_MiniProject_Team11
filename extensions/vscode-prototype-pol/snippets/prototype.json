@@ -1,0 +1,122 @@
+{
+  "Include Library": {
+    "prefix": "include",
+    "body": [
+      "include ${1:lib.machine}"
+    ],
+    "description": "Include a Prototype.pol library or module"
+  },
+  "Device Definition": {
+    "prefix": "define",
+    "body": [
+      "define &${1:device} ${2:machine.switch} --${3|common,unique|}"
+    ],
+    "description": "Define a device or component reference"
+  },
+  "Detail Block": {
+    "prefix": "detail",
+    "body": [
+      "detail ${1:device}:",
+      "\t${0}"
+    ],
+    "description": "Configuration detail block for a component"
+  },
+  "Macro Definition": {
+    "prefix": "macro",
+    "body": [
+      "macro @${1:name} ${2:function}(${3}):",
+      "\t${0}",
+      "\treturn ${4};"
+    ],
+    "description": "Define a parameterized Prototype.pol macro"
+  },
+  "Spawns Block": {
+    "prefix": "__SPAWNS__",
+    "body": [
+      "__SPAWNS__ {",
+      "\t${0}",
+      "}@bundle #padding=0"
+    ],
+    "description": "Component instance spawn block"
+  },
+  "Connections Block": {
+    "prefix": "__CONNECTIONS__",
+    "body": [
+      "__CONNECTIONS__ {",
+      "\tunpack bundle;",
+      "",
+      "\tconnect_multi {",
+      "\t\t${0}",
+      "\t}",
+      "}"
+    ],
+    "description": "Network interconnect block"
+  },
+  "Spawn Statement": {
+    "prefix": "spawn",
+    "body": [
+      "spawn ${1:cable.high_speed} ${2:alias} ${3:hi};"
+    ],
+    "description": "Instantiate an entity with an alias"
+  },
+  "Spawn Count Statement": {
+    "prefix": "spawn-count",
+    "body": [
+      "spawn ${1:cable.high_speed} ${2:2} alias ${3:hi};"
+    ],
+    "description": "Instantiate an entity with a maximum instance limit and an alias"
+  },
+  "Connection Tuple": {
+    "prefix": "conn",
+    "body": [
+      "(${1:source}, ${2:cable}, ${3:destination});"
+    ],
+    "description": "Interconnection tuple: (source, cable, destination)"
+  },
+  "Deploy Block": {
+    "prefix": "deploy",
+    "body": [
+      "deploy:",
+      "\t${1:machine.topology.layout};"
+    ],
+    "description": "Deploy the topology layout"
+  },
+  "Data Declaration": {
+    "prefix": "data",
+    "body": [
+      "data ${1:variable_name};"
+    ],
+    "description": "Declare a local data variable"
+  },
+  "Data Operation": {
+    "prefix": "dataop",
+    "body": [
+      "data.${1|define,in,out,flow|}(${2:variable}, ${3:value});"
+    ],
+    "description": "Configure data rate or buffer property"
+  },
+  "Cable Detail Block": {
+    "prefix": "detail-cable",
+    "body": [
+      "detail cable:",
+      "\tinstance high_speed",
+      "\tinstance medium",
+      "\tinstance low_speed",
+      "",
+      "\tdata rate;",
+      "",
+      "\tdetail high_speed:",
+      "\t\tdata.flow(rate, ${1:100}@mega);",
+      "\t\thigh_speed::field.rate(\"any\") = rate;",
+      "",
+      "\tdetail medium:",
+      "\t\tdata.flow(rate, ${2:10}@mega);",
+      "\t\tmedium::field.rate(\"any\") = rate;",
+      "",
+      "\tdetail low_speed:",
+      "\t\tdata.flow(rate, ${3:5}@mega);",
+      "\t\tlow_speed::field.rate(\"any\") = rate;"
+    ],
+    "description": "Standard multi-speed cable detail configuration"
+  }
+}
