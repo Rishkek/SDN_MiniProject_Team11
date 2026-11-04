@@ -34,6 +34,8 @@
       {
         "id": "prototype-pol",
         "aliases": [
+          "Topology",
+          "topology",
           "Prototype.pol",
           "prototype-pol",
           "pol"
@@ -46,6 +48,8 @@
       {
         "id": "prototype-pollib",
         "aliases": [
+          "Topology Header",
+          "topology header",
           "Prototype.pol Library",
           "prototype-pollib",
           "pollib"

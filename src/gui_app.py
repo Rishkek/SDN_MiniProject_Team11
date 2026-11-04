@@ -208,9 +208,9 @@ class AnimatedTopologyCanvas(QWidget):
 
         filepath, _ = QFileDialog.getOpenFileName(
             self,
-            f"Open Topology File (*{TOPOLOGY_FILE_EXTENSION})",
+            "Open Topology File",
             start_dir,
-            f"Topology JSON (*{TOPOLOGY_FILE_EXTENSION});;All Files (*)"
+            "Topology (*.pol);;Topology Header (*.pollib);;Topology JSON (*.json);;All Files (*)"
         )
         if not filepath:
             return
@@ -218,17 +218,33 @@ class AnimatedTopologyCanvas(QWidget):
         # Persist directory so subsequent open dialogs stay in the current folder
         self._last_topo_dir = os.path.dirname(os.path.abspath(filepath))
 
-        if not filepath.lower().endswith(TOPOLOGY_FILE_EXTENSION):
+        target_json = filepath
+        if filepath.lower().endswith(".pol"):
+            try:
+                from pol_compiler import compile_pol_file
+                base_name = os.path.splitext(os.path.basename(filepath))[0]
+                out_dir = os.path.join(os.getcwd(), "topology_src")
+                os.makedirs(out_dir, exist_ok=True)
+                target_json = os.path.join(out_dir, f"{base_name}.json")
+                compile_pol_file(filepath, output_path=target_json)
+            except Exception as comp_err:
+                QMessageBox.critical(
+                    self,
+                    "Compilation Error",
+                    f"Failed to compile '{os.path.basename(filepath)}':\n{comp_err}"
+                )
+                return
+        elif not filepath.lower().endswith(TOPOLOGY_FILE_EXTENSION):
             QMessageBox.warning(
                 self,
-                "Invalid Topology Extension",
-                f"Only files with a '{TOPOLOGY_FILE_EXTENSION}' extension are supported by the topology loader.\n\n"
-                f"Selected file: {os.path.basename(filepath)}"
+                "Unsupported File Type",
+                f"Please choose a Prototype.pol source (.pol) or compiled topology JSON (.json) file.\n\n"
+                f"Selected: {os.path.basename(filepath)}"
             )
             return
 
         try:
-            topo = load_topology(filepath)
+            topo = load_topology(target_json)
             self.set_topology(topo)
 
             # Notify parent window if available
@@ -1895,6 +1911,12 @@ class MasterSDNGUI(QMainWindow):
         act_load_topo.triggered.connect(self._open_topology_dialog)
         menu_file.addAction(act_load_topo)
 
+        act_save_topo = QAction("💾 &Save Topology As...", self)
+        act_save_topo.setShortcut("Ctrl+S")
+        act_save_topo.setStatusTip("Save the active topology as a .pol, .pollib, or .json file")
+        act_save_topo.triggered.connect(self._save_topology_dialog)
+        menu_file.addAction(act_save_topo)
+
         act_term = QAction("🖥 Launch External OS Terminal Monitor (CMD)", self)
         act_term.triggered.connect(self._launch_external_terminal)
         menu_file.addAction(act_term)
@@ -1938,6 +1960,166 @@ class MasterSDNGUI(QMainWindow):
         """Dispatches open topology dialog to the canvas widget."""
         if hasattr(self, "topo_canvas") and self.topo_canvas:
             self.topo_canvas._open_topology_file_dialog()
+
+    def _save_topology_dialog(self):
+        """Opens file explorer to save the active topology as .pol, .pollib, or .json."""
+        if not hasattr(self, "topo_canvas") or not self.topo_canvas or not self.topo_canvas.topo_def:
+            QMessageBox.information(self, "No Active Topology", "There is no active topology loaded to save.")
+            return
+
+        start_dir = getattr(self.topo_canvas, "_last_topo_dir", None)
+        if not start_dir or not os.path.isdir(start_dir):
+            cand_pol_src = os.path.join(os.getcwd(), "pol_src")
+            start_dir = cand_pol_src if os.path.isdir(cand_pol_src) else os.getcwd()
+
+        start_dir = os.path.abspath(start_dir).replace("\\", "/") + "/"
+
+        filepath, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save Topology As",
+            start_dir,
+            "Topology (*.pol);;Topology Header (*.pollib);;Topology JSON (*.json);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        self.topo_canvas._last_topo_dir = os.path.dirname(os.path.abspath(filepath))
+
+        try:
+            if filepath.lower().endswith(".pol") or "(*.pol)" in selected_filter:
+                if not filepath.lower().endswith(".pol"):
+                    filepath += ".pol"
+                code = self._generate_pol_source(self.topo_canvas.topo_def)
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(code)
+                QMessageBox.information(self, "Topology Saved", f"Successfully saved Prototype.pol source:\n{filepath}")
+            elif filepath.lower().endswith(".pollib") or "(*.pollib)" in selected_filter:
+                if not filepath.lower().endswith(".pollib"):
+                    filepath += ".pollib"
+                code = self._generate_pollib_source(self.topo_canvas.topo_def)
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(code)
+                QMessageBox.information(self, "Topology Header Saved", f"Successfully saved Prototype.pollib header:\n{filepath}")
+            else:
+                if not filepath.lower().endswith(".json"):
+                    filepath += ".json"
+                from src.topology_loader import save_topology
+                save_topology(self.topo_canvas.topo_def, filepath)
+                QMessageBox.information(self, "Topology Saved", f"Successfully saved topology JSON:\n{filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save topology file:\n{e}")
+
+    def _generate_pol_source(self, topo_def) -> str:
+        """Generates human-readable Prototype.pol source code from active topology."""
+        lines = [
+            "include lib.machine",
+            "include lib.wire",
+            "include lib.data",
+            "",
+            "define &sender machine.host.sender",
+            "define &reciever machine.host.reciever",
+            "define &ingress machine.switch --unique",
+            "define &egress machine.switch --unique",
+            "define &switch machine.switch --common",
+            "define &cable wire --common",
+            "",
+            "grid OFF",
+            "",
+            "detail sender:",
+            "    data send_rate;",
+            "    data.out(send_rate, 100@kilo);",
+            "    sender::field.rate(\"out\") = send_rate;",
+            "",
+            "detail reciever:",
+            "    data recieve_rate;",
+            "    data.in(recieve_rate, 300@kilo);",
+            "    reciever::field.rate(\"in\") = recieve_rate;",
+            "",
+            "detail cable:",
+            "    instance high_speed",
+            "    instance medium",
+            "    instance low_speed",
+            "    data rate;",
+            "    detail high_speed:",
+            "        data.flow(rate, 100@mega);",
+            "        high_speed::field.rate(\"any\") = rate;",
+            "    detail medium:",
+            "        data.flow(rate, 10@mega);",
+            "        medium::field.rate(\"any\") = rate;",
+            "    detail low_speed:",
+            "        data.flow(rate, 5@mega);",
+            "        low_speed::field.rate(\"any\") = rate;",
+            "",
+            "detail machine.topology.layout:",
+            f"    machine bundle[{max(16, len(topo_def.switches) + len(topo_def.hosts) * 2)}];",
+            "",
+            "    __SPAWNS__ {",
+            "        spawn cable.high_speed 8 alias hi;",
+            "        spawn cable.medium 8 alias med;",
+            "        spawn cable.low_speed 8 alias lo;"
+        ]
+
+        for s in topo_def.switches:
+            s_id = s.get("id", "s1")
+            role = s.get("role", "switch")
+            if role == "ingress":
+                lines.append(f"        spawn ingress alias {s_id};")
+            elif role == "egress":
+                lines.append(f"        spawn egress alias {s_id};")
+            else:
+                lines.append(f"        spawn switch alias {s_id};")
+
+        for h in topo_def.hosts:
+            h_id = h.get("id", "h1")
+            role = h.get("role", "sender")
+            if "receiver" in role:
+                lines.append(f"        spawn reciever alias {h_id};")
+            else:
+                lines.append(f"        spawn sender alias {h_id};")
+
+        lines.append("    }@bundle #padding=0")
+        lines.append("")
+        lines.append("    __CONNECTIONS__ {")
+        lines.append("        unpack bundle;")
+        lines.append("        connect_multi {")
+
+        for lk in topo_def.links:
+            s = lk.get("src", "")
+            d = lk.get("dst", "")
+            c = lk.get("cable_alias", "hi" if (s.startswith("h") or d.startswith("h")) else "med")
+            lines.append(f"            ({s}, {c}, {d});")
+
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("deploy:")
+        lines.append("    machine.topology.layout;")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _generate_pollib_source(self, topo_def) -> str:
+        """Generates Prototype.pollib reusable header library source."""
+        lines = [
+            "# ==========================================",
+            f"# {topo_def.name.upper()} LIBRARY DEFINITIONS",
+            "# ==========================================",
+            "",
+            "include lib.machine",
+            "include lib.wire",
+            "include lib.data",
+            "",
+            "define wire",
+            "",
+            "detail wire:",
+            "    data rate;",
+            "    data delay;",
+            "    data queue;",
+            "    wire::field.rate(\"any\") = rate;",
+            "    wire::field.delay = delay;",
+            "    wire::field.queue = queue;",
+            ""
+        ]
+        return "\n".join(lines)
 
     def _init_header_bar(self):
         header_widget = QWidget()
