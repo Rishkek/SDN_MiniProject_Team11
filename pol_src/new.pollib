@@ -1,0 +1,35 @@
+include lib.machine
+include lib.wire
+include lib.data
+
+define &sender machine.host.sender
+define &reciever machine.host.reciever
+define &switch machine.switch --common
+define &cable wire --common
+
+grid OFF
+
+
+detail sender:
+    data send_rate;
+    data.out(send_rate, 100@kilo);
+    sender::field.rate("out") = send_rate;
+
+detail reciever:
+    data recieve_rate;
+    data.in(recieve_rate, 300@kilo);
+    reciever::field.rate("in") = recieve_rate;
+
+detail cable:
+    instance high_speed
+    instance medium
+
+    data rate;
+
+    detail high_speed:
+        data.flow(rate, 100@mega);
+        high_speed::field.rate("any") = rate;
+
+    detail medium:
+        data.flow(rate, 10@mega);
+        medium::field.rate("any") = rate;

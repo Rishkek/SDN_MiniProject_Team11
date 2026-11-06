@@ -2,7 +2,7 @@
   "name": "prototypelanguage",
   "displayName": "Prototype.pol Language Support",
   "description": "Syntax highlighting, code snippets, and language support for Prototype.pol network topologies (.pol) and libraries (.pollib).",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "rishkek",
   "icon": "images/icon.png",
   "repository": {

@@ -1,0 +1,44 @@
+pull::data.polh
+
+define wire:
+    wire.type = int32; //wire profile and traffic-class fields use integer IDs/values
+    wire.fields(5){
+        dictfield profile[] = {
+            host_edge: 1;
+            high_speed: 2;
+            medium: 3;
+            low_speed: 4;
+            primary_path: 5;
+            alternate_path: 6;
+        }
+
+        dictfield capacity_mbps[] = {
+            host_edge: 100;
+            high_speed: 100;
+            medium: 10;
+            low_speed: 5;
+            primary_path: 10;
+            alternate_path: 10;
+        }
+
+        dictfield delay_ms[] = {
+            host_edge: 1;
+            primary_path: 5;
+            alternate_path: 15;
+        }
+
+        dictfield queue_packets[] = {
+            host_edge: 1000;
+            primary_path: 100;
+            alternate_path: 100;
+        }
+
+        dictfield traffic_class[] = {
+            main_udp: 1;
+            cross_udp: 2;
+            probe_udp: 3;
+            feedback: 4;
+            openflow_control: 5;
+            telemetry_monitor: 6;
+        }
+    }

@@ -1,6 +1,7 @@
 {
   "comments": {
-    "lineComment": "#"
+    "lineComment": "#",
+    "blockComment": ["/*", "*/"]
   },
   "brackets": [
     ["{", "}"],
@@ -23,12 +24,12 @@
   ],
   "folding": {
     "markers": {
-      "start": "^\\s*(detail|macro|deploy|__SPAWNS__|__CONNECTIONS__|connect_multi)\\b",
+      "start": "^\\s*(detail|macro|deploy|__SPAWNS__|__CONNECTIONS__|connect_multi|topology|spawns|connections|define_multi)\\b",
       "end": "^\\s*(\\}|deploy:)"
     }
   },
   "indentationRules": {
-    "increaseIndentPattern": "^.*(:|\\{|connect_multi|__SPAWNS__|__CONNECTIONS__)\\s*(#.*)?$",
+    "increaseIndentPattern": "^.*(:|\\{|connect_multi|__SPAWNS__|__CONNECTIONS__|topology|spawns|connections|define_multi)\\s*(#.*|//.*)?$",
     "decreaseIndentPattern": "^\\s*\\}"
   },
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([&@a-zA-Z_][a-zA-Z0-9_.]*)"

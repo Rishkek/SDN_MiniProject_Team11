@@ -63,10 +63,11 @@ class PolCompiler:
 
         # Infer topology name and type from file name if auto
         base_name = os.path.splitext(os.path.basename(filepath))[0]
-        ir.name = f"{base_name.capitalize()} Topology"
+        if ir.name == "Prototype.pol Topology":
+            ir.name = f"{base_name.capitalize()} Topology"
 
         if topology_type == "auto":
-            inferred = base_name.lower()
+            inferred = (base_name + " " + ir.name).lower()
             if any(t in inferred for t in ("diamond", "star", "ring", "bus", "mesh")):
                 for t in ("diamond", "star", "ring", "bus", "mesh"):
                     if t in inferred:

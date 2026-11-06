@@ -1,0 +1,17 @@
+define data:
+    data.type = int32; //makes the type of all the fields as int32
+    data.fields(1){
+        dictfield multiplier[] = {
+            bit: 1;
+            byte: 8;
+            Kb = 1024*bit;
+            Mb = 1024*Kb;
+            Gb = 1024*Mb;
+            Tb = 1024*Gb;
+            KB = 1024*byte;
+            MB = 1024*KB;
+            GB = 1024*MB;
+            TB = 1024*GB;
+
+        }
+    }

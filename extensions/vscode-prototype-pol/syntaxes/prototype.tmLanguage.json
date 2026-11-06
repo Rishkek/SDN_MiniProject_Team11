@@ -28,6 +28,15 @@
         {
           "name": "comment.line.number-sign.pol",
           "match": "#.*$"
+        },
+        {
+          "name": "comment.line.double-slash.pol",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.pol",
+          "begin": "/\\*",
+          "end": "\\*/"
         }
       ]
     },
@@ -72,7 +81,7 @@
       "patterns": [
         {
           "name": "keyword.control.pol",
-          "match": "\\b(include|define|detail|macro|instance|spawn|alias|return|deploy|unpack|connect_multi|grid)\\b"
+          "match": "\\b(include|pull|define|define_multi|detail|macro|instance|spawn|alias|as|return|deploy|unpack|connect_multi|grid|topology|spawns|connections)\\b"
         },
         {
           "name": "constant.language.grid.pol",

@@ -21,7 +21,8 @@ class LexerError(ValueError):
 KEYWORDS = {
     "include", "define", "detail", "instance", "data", "macro",
     "spawn", "alias", "var", "machine", "bundle", "unpack",
-    "connect_multi", "deploy", "grid", "return", "ports"
+    "connect_multi", "deploy", "grid", "return", "ports",
+    "pull", "define_multi", "as", "topology", "spawns", "connections"
 }
 
 
@@ -66,7 +67,22 @@ class Lexer:
                     tokens.append(Token("PADDING_DIRECTIVE", val, start_line, start_col))
                     continue
 
-            # Comments (# or //)
+            # Comments (# or // or /* ... */)
+            if ch == "/" and self.pos + 1 < self.length and self.source[self.pos + 1] == "*":
+                self.pos += 2
+                self.col += 2
+                while self.pos + 1 < self.length and not (self.source[self.pos] == "*" and self.source[self.pos + 1] == "/"):
+                    if self.source[self.pos] == "\n":
+                        self.line += 1
+                        self.col = 1
+                    else:
+                        self.col += 1
+                    self.pos += 1
+                if self.pos + 1 < self.length:
+                    self.pos += 2
+                    self.col += 2
+                continue
+
             if ch == "#" or (ch == "/" and self.pos + 1 < self.length and self.source[self.pos + 1] == "/"):
                 while self.pos < self.length and self.source[self.pos] != "\n":
                     self.pos += 1
@@ -207,6 +223,9 @@ class Lexer:
                 "*": "STAR",
                 "/": "SLASH",
                 ".": "DOT",
+                "<": "LANGLE",
+                ">": "RANGLE",
+                "!": "BANG",
             }
             if ch in simple_tokens:
                 tokens.append(Token(simple_tokens[ch], ch, self.line, self.col))

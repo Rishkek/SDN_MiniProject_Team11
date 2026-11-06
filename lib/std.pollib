@@ -1,0 +1,68 @@
+# Standard Prelude for Prototype.pol Topologies
+# Pre-defines core devices, switches, hosts, cables, and default rate profiles.
+
+include lib.machine
+include lib.wire
+include lib.data
+
+define &sender machine.host.sender
+define &reciever machine.host.reciever
+define &receiver machine.host.receiver
+define &ingress machine.switch --unique
+define &egress machine.switch --unique
+define &switch machine.switch --common
+define &cable wire --common
+
+grid OFF
+
+detail sender:
+    data send_rate;
+    data.out(send_rate, 100@kilo);
+    sender::field.rate("out") = send_rate;
+
+detail reciever:
+    data recieve_rate;
+    data.in(recieve_rate, 300@kilo);
+    reciever::field.rate("in") = recieve_rate;
+
+detail receiver:
+    data recieve_rate;
+    data.in(recieve_rate, 300@kilo);
+    receiver::field.rate("in") = recieve_rate;
+
+macro @switch switch_define(switch @switch_t,
+    int a, int b, int packet_size, int buffer_size):
+
+    data packet;
+    data.define(packet, packet_size@kilo);
+    data buffer[buffer_size*packet];
+
+    switch_t::ports("in") = a;
+    switch_t::ports("out") = b;
+
+    return switch_t;
+
+detail ingress:
+    switch_define(ingress, 1, 2, 1, 256);
+
+detail egress:
+    switch_define(egress, 2, 1, 1, 256);
+
+detail cable:
+    instance high_speed
+    instance medium
+    instance low_speed
+
+    data rate;
+
+    detail high_speed:
+        data.flow(rate, 100@mega);
+        high_speed::field.rate("any") = rate;
+
+    detail medium:
+        data.flow(rate, 10@mega);
+        medium::field.rate("any") = rate;
+
+    detail low_speed:
+        data.flow(rate, 5@mega);
+        low_speed::field.rate("any") = rate;

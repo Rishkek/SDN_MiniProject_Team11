@@ -267,6 +267,11 @@ class SemanticAnalyzer:
             self._handle_connections(stmt)
 
     def _analyze_topology_block(self, node: DetailNode):
+        if node.target.startswith("machine.topology."):
+            suffix = node.target.split("machine.topology.", 1)[1]
+            if suffix and suffix != "layout":
+                self.ir.name = f"{suffix.capitalize()} Topology"
+
         for item in node.body:
             if isinstance(item, SpawnsBlockNode):
                 self._handle_spawns(item)

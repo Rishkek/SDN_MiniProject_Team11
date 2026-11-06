@@ -19,11 +19,24 @@ class Preprocessor:
     """Recursively resolves all includes in Prototype.pol source files."""
 
     def __init__(self, search_paths: Optional[List[str]] = None):
-        self.search_paths = search_paths or ["lib", ".", "pol_src"]
+        self.search_paths = search_paths or ["lib", ".", "pol_src", "pol_src/lib"]
         self.loaded_files: Set[str] = set()
         self.in_progress: Set[str] = set()
 
     def resolve_target_path(self, target: str, current_dir: str = ".") -> str:
+        # Clean target: strip whitespace, quotes, and angle brackets
+        target = target.strip().strip('"\'<>')
+
+        # Check special alias for standard prelude or illustrative placeholder
+        if target in ("std", "lib.std", "header files"):
+            for p in self.search_paths:
+                cand = os.path.join(p, "std.pollib")
+                if os.path.isfile(cand):
+                    return os.path.abspath(cand)
+            root_std = os.path.join("lib", "std.pollib")
+            if os.path.isfile(root_std):
+                return os.path.abspath(root_std)
+
         # 1. Check for standard library targets like 'lib.machine' -> 'lib/machine.pollib'
         if target.startswith("lib."):
             lib_sub = target[4:] + ".pollib"
@@ -41,19 +54,19 @@ class Preprocessor:
         if os.path.isfile(direct):
             return os.path.abspath(direct)
 
-        # 3. Check with .pollib extension if not provided
-        if not target.endswith(".pollib") and not target.endswith(".pol"):
-            cand_pollib = os.path.join(current_dir, target + ".pollib")
-            if os.path.isfile(cand_pollib):
-                return os.path.abspath(cand_pollib)
+        # 3. Check with extensions (.pollib, .polh, .pol) relative to current_dir
+        for ext in (".pollib", ".polh", ".pol"):
+            cand = os.path.join(current_dir, target + ext)
+            if os.path.isfile(cand):
+                return os.path.abspath(cand)
 
         # 4. Search in search_paths
         for p in self.search_paths:
             cand = os.path.join(p, target)
             if os.path.isfile(cand):
                 return os.path.abspath(cand)
-            if not target.endswith(".pollib"):
-                cand2 = os.path.join(p, target + ".pollib")
+            for ext in (".pollib", ".polh", ".pol"):
+                cand2 = os.path.join(p, target + ext)
                 if os.path.isfile(cand2):
                     return os.path.abspath(cand2)
 

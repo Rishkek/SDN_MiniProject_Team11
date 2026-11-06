@@ -53,11 +53,13 @@ class Parser:
         statements: List[ASTNode] = []
         while not self.match("EOF"):
             stmt = self.parse_top_level_statement()
-            if stmt:
+            if isinstance(stmt, list):
+                statements.extend(stmt)
+            elif stmt:
                 statements.append(stmt)
         return ProgramNode(statements=statements)
 
-    def parse_top_level_statement(self) -> Optional[ASTNode]:
+    def parse_top_level_statement(self) -> Optional[Any]:
         tok = self.current()
 
         # Optional extra semicolons
@@ -74,9 +76,29 @@ class Parser:
                 return IncludeNode(target=target, line=tok.line, col=tok.column)
             raise ParserError(f"Expected include target path at {tok.line}:{tok.column}")
 
+        # pull (pull@"lib", pull@<header>, pull::lib, pull std)
+        if self.match("PULL"):
+            return self.parse_pull_statement(tok)
+
+        # define_multi { ... }
+        if self.match("DEFINE_MULTI"):
+            return self.parse_define_multi(tok)
+
         # define
         if self.match("DEFINE"):
             return self.parse_define_statement(tok)
+
+        # topology <Name>:
+        if self.match("TOPOLOGY"):
+            return self.parse_topology_block(tok)
+
+        # top-level spawns or __SPAWNS__
+        if (tok.type == "DIRECTIVE" and tok.value == "__SPAWNS__") or tok.type == "SPAWNS" or (tok.type == "IDENT" and tok.value.lower() == "spawns"):
+            return self.parse_spawns_block()
+
+        # top-level connections or __CONNECTIONS__
+        if (tok.type == "DIRECTIVE" and tok.value == "__CONNECTIONS__") or tok.type == "CONNECTIONS" or (tok.type == "IDENT" and tok.value.lower() == "connections"):
+            return self.parse_connections_block()
 
         # grid ON/OFF
         if self.match("GRID"):
@@ -111,6 +133,138 @@ class Parser:
 
         # If unknown top-level token, consume and warn/raise
         raise ParserError(f"Unexpected top-level token {tok.type} ('{tok.value}') at {tok.line}:{tok.column}")
+
+    def parse_pull_statement(self, start_tok: Token) -> IncludeNode:
+        # Optional @ or ::
+        if self.match("AT"):
+            pass
+        elif self.match("DOUBLE_COLON"):
+            pass
+
+        target = ""
+        # Check if angle bracket: <header> or <header files>
+        if self.match("LANGLE"):
+            parts = []
+            while not self.match("RANGLE") and not self.match("EOF"):
+                parts.append(self.current().value)
+                self.pos += 1
+            target = " ".join(parts).strip()
+        elif self.current().type in ("STRING", "IDENT"):
+            target_tok = self.current()
+            self.pos += 1
+            target = target_tok.value
+            # If followed by .ext (like data.polh)
+            while self.match("DOT"):
+                if self.current().type == "IDENT":
+                    target += "." + self.current().value
+                    self.pos += 1
+                else:
+                    break
+        else:
+            raise ParserError(f"Expected header or target path after 'pull' at {start_tok.line}:{start_tok.column}")
+
+        self.match("SEMICOLON")
+        return IncludeNode(target=target, line=start_tok.line, col=start_tok.column)
+
+    def parse_define_multi(self, start_tok: Token) -> List[DefineNode]:
+        self.expect("LBRACE", "Expected '{' after 'define_multi'")
+        defs: List[DefineNode] = []
+
+        while not self.match("RBRACE") and not self.match("EOF"):
+            if self.match("SEMICOLON"):
+                continue
+
+            # Check for group definition: (&)(sender, reciever) { ... }
+            # Or &(sender, reciever) { ... }
+            # Or (sender, reciever) { ... }
+            if self.current().type in ("AMP", "LPAREN") or (self.current().type == "AMP_IDENT" and self.current().value == "&"):
+                if self.current().type == "AMP":
+                    self.pos += 1
+
+                # Check for (&)
+                if self.current().type == "LPAREN" and self.peek(1).type == "AMP" and self.peek(2).type == "RPAREN":
+                    self.pos += 3
+
+                # Expect LPAREN for identifier list
+                self.expect("LPAREN", "Expected '(' for symbol tuple in define_multi")
+                symbols: List[str] = []
+                while not self.match("RPAREN"):
+                    s_tok = self.current()
+                    if s_tok.type in ("IDENT", "AMP_IDENT"):
+                        self.pos += 1
+                        val = s_tok.value if s_tok.value.startswith("&") else f"&{s_tok.value}"
+                        symbols.append(val)
+                    if not self.match("COMMA"):
+                        self.expect("RPAREN", "Expected ')' or ',' in define_multi symbol list")
+                        break
+
+                self.expect("LBRACE", "Expected '{' for group definition body")
+                entries: List[Tuple[str, bool, bool]] = []
+                while not self.match("RBRACE") and not self.match("EOF"):
+                    if self.match("SEMICOLON"):
+                        continue
+                    t_tok = self.expect("IDENT", "Expected target type inside define_multi group")
+                    target_type = t_tok.value
+                    is_unique = False
+                    is_common = False
+                    while self.current().type == "MODIFIER":
+                        mod = self.current().value.lower()
+                        self.pos += 1
+                        if mod == "--unique":
+                            is_unique = True
+                        elif mod == "--common":
+                            is_common = True
+                    self.match("SEMICOLON")
+                    entries.append((target_type, is_unique, is_common))
+
+                if len(entries) == 1:
+                    ttype, u, c = entries[0]
+                    for s in symbols:
+                        defs.append(DefineNode(symbol=s, target_type=ttype, is_unique=u, is_common=c, line=start_tok.line, col=start_tok.column))
+                elif len(entries) == len(symbols):
+                    for s, (ttype, u, c) in zip(symbols, entries):
+                        defs.append(DefineNode(symbol=s, target_type=ttype, is_unique=u, is_common=c, line=start_tok.line, col=start_tok.column))
+                else:
+                    for i, s in enumerate(symbols):
+                        entry = entries[i] if i < len(entries) else entries[-1]
+                        defs.append(DefineNode(symbol=s, target_type=entry[0], is_unique=entry[1], is_common=entry[2], line=start_tok.line, col=start_tok.column))
+                continue
+
+            # Check for inline define statement: define &switch ...
+            if self.match("DEFINE"):
+                d = self.parse_define_statement(self.tokens[self.pos - 1])
+                defs.append(d)
+                continue
+
+            # Inline without keyword define: &switch machine.switch --common
+            if self.current().type in ("IDENT", "AMP_IDENT"):
+                d = self.parse_define_statement(self.current())
+                defs.append(d)
+                continue
+
+            raise ParserError(f"Unexpected token {self.current().type} ('{self.current().value}') in define_multi at {self.current().line}:{self.current().column}")
+
+        return defs
+
+    def parse_topology_block(self, start_tok: Token) -> DetailNode:
+        topo_name = ""
+        if self.current().type == "IDENT":
+            topo_name = self.current().value
+            self.pos += 1
+        self.expect("COLON", "Expected ':' after 'topology'")
+
+        body: List[ASTNode] = []
+        while self.pos < self.total and self.current().type not in ("EOF", "DEFINE", "DEFINE_MULTI", "DEPLOY", "PULL", "INCLUDE", "TOPOLOGY"):
+            if self.match("SEMICOLON"):
+                continue
+            stmt = self.parse_block_statement()
+            if stmt:
+                body.append(stmt)
+            else:
+                break
+
+        target = f"machine.topology.{topo_name.lower()}" if topo_name else "machine.topology.layout"
+        return DetailNode(target=target, body=body, line=start_tok.line, col=start_tok.column)
 
     def parse_define_statement(self, start_tok: Token) -> DefineNode:
         symbol_tok = self.current()
@@ -255,12 +409,12 @@ class Parser:
                 self.match("SEMICOLON")
                 return BundleDeclNode(element_type="machine", name="bundle", capacity=int(num_tok.value), line=tok.line, col=tok.column)
 
-        # __SPAWNS__ { ... }@bundle #padding=0
-        if tok.type == "DIRECTIVE" and tok.value == "__SPAWNS__":
+        # __SPAWNS__ or spawns { ... }@bundle #padding=0
+        if (tok.type == "DIRECTIVE" and tok.value == "__SPAWNS__") or tok.type == "SPAWNS" or (tok.type == "IDENT" and tok.value.lower() == "spawns"):
             return self.parse_spawns_block()
 
-        # __CONNECTIONS__ { unpack bundle; connect_multi { ... } }
-        if tok.type == "DIRECTIVE" and tok.value == "__CONNECTIONS__":
+        # __CONNECTIONS__ or connections { unpack bundle; connect_multi { ... } }
+        if (tok.type == "DIRECTIVE" and tok.value == "__CONNECTIONS__") or tok.type == "CONNECTIONS" or (tok.type == "IDENT" and tok.value.lower() == "connections"):
             return self.parse_connections_block()
 
         # data declaration: data <name>; or data <name>[size];
@@ -351,11 +505,11 @@ class Parser:
 
     def parse_spawns_block(self) -> SpawnsBlockNode:
         start_tok = self.current()
-        self.pos += 1  # consume __SPAWNS__
-        self.expect("LBRACE", "Expected '{' after __SPAWNS__")
+        self.pos += 1  # consume __SPAWNS__ or spawns
+        self.expect("LBRACE", "Expected '{' after spawns block header")
 
         spawns: List[SpawnNode] = []
-        while not self.match("RBRACE"):
+        while not self.match("RBRACE") and not self.match("EOF"):
             if self.match("SPAWN"):
                 type_tok = self.expect("IDENT", "Expected component type after 'spawn'")
                 type_name = type_tok.value
@@ -368,17 +522,32 @@ class Parser:
                 elif curr.type == "VAR":
                     count = "var"
                     self.pos += 1
+                elif curr.type in ("ALIAS", "AS") or (curr.type == "IDENT" and curr.value.lower() in ("alias", "as")):
+                    count = "var"
 
-                self.expect("ALIAS", "Expected 'alias' in spawn declaration")
-                alias_tok = self.expect("IDENT", "Expected alias identifier")
+                # Expect alias or as
+                alias_kw_tok = self.current()
+                if alias_kw_tok.type in ("ALIAS", "AS") or (alias_kw_tok.type == "IDENT" and alias_kw_tok.value.lower() in ("alias", "as")):
+                    self.pos += 1
+                else:
+                    raise ParserError(f"Expected 'alias' or 'as' in spawn declaration, got {alias_kw_tok.type} at {alias_kw_tok.line}:{alias_kw_tok.column}")
+
+                # Comma-separated list of aliases
+                aliases: List[str] = []
+                first_alias = self.expect("IDENT", "Expected alias identifier")
+                aliases.append(first_alias.value)
+                while self.match("COMMA"):
+                    next_alias = self.expect("IDENT", "Expected alias identifier after comma")
+                    aliases.append(next_alias.value)
                 self.match("SEMICOLON")
 
-                spawns.append(SpawnNode(type_name=type_name, count=count, alias=alias_tok.value, line=type_tok.line, col=type_tok.column))
+                for a in aliases:
+                    spawns.append(SpawnNode(type_name=type_name, count=count, alias=a, line=type_tok.line, col=type_tok.column))
             elif self.match("SEMICOLON"):
                 continue
             else:
                 # Unexpected token in spawns
-                raise ParserError(f"Unexpected token {self.current().type} ('{self.current().value}') in __SPAWNS__ at {self.current().line}:{self.current().column}")
+                raise ParserError(f"Unexpected token {self.current().type} ('{self.current().value}') in spawns block at {self.current().line}:{self.current().column}")
 
         # Check for optional trailing }@bundle #padding=0
         bundle_target = None
@@ -393,13 +562,13 @@ class Parser:
 
     def parse_connections_block(self) -> ConnectionsBlockNode:
         start_tok = self.current()
-        self.pos += 1  # consume __CONNECTIONS__
-        self.expect("LBRACE", "Expected '{' after __CONNECTIONS__")
+        self.pos += 1  # consume __CONNECTIONS__ or connections
+        self.expect("LBRACE", "Expected '{' after connections block header")
 
         unpack_target = None
         connections: List[ConnectTupleNode] = []
 
-        while not self.match("RBRACE"):
+        while not self.match("RBRACE") and not self.match("EOF"):
             if self.match("UNPACK"):
                 t_tok = self.current()
                 if t_tok.type in ("IDENT", "BUNDLE"):
@@ -412,7 +581,7 @@ class Parser:
 
             if self.match("CONNECT_MULTI"):
                 self.expect("LBRACE", "Expected '{' after 'connect_multi'")
-                while not self.match("RBRACE"):
+                while not self.match("RBRACE") and not self.match("EOF"):
                     if self.match("LPAREN"):
                         # (src, cable, dst)
                         src_tok = self.expect("IDENT", "Expected source node in connection tuple")
@@ -436,10 +605,29 @@ class Parser:
                         raise ParserError(f"Unexpected token in connect_multi: {self.current().type} at {self.current().line}:{self.current().column}")
                 continue
 
+            # Direct connection tuple: (src, cable, dst);
+            if self.match("LPAREN"):
+                src_tok = self.expect("IDENT", "Expected source node in connection tuple")
+                self.expect("COMMA", "Expected ',' after source node")
+                cable_tok = self.expect("IDENT", "Expected cable identifier in connection tuple")
+                self.expect("COMMA", "Expected ',' after cable")
+                dst_tok = self.expect("IDENT", "Expected destination node in connection tuple")
+                self.expect("RPAREN", "Expected ')' closing connection tuple")
+                self.match("SEMICOLON")
+
+                connections.append(ConnectTupleNode(
+                    src=src_tok.value,
+                    cable=cable_tok.value,
+                    dst=dst_tok.value,
+                    line=src_tok.line,
+                    col=src_tok.column
+                ))
+                continue
+
             if self.match("SEMICOLON"):
                 continue
 
-            raise ParserError(f"Unexpected token in __CONNECTIONS__: {self.current().type} at {self.current().line}:{self.current().column}")
+            raise ParserError(f"Unexpected token in connections block: {self.current().type} at {self.current().line}:{self.current().column}")
 
         return ConnectionsBlockNode(unpack_target=unpack_target, connections=connections, line=start_tok.line, col=start_tok.column)
 

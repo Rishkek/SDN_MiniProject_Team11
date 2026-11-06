@@ -1,4 +1,57 @@
 {
+  "Pull Prelude or Header": {
+    "prefix": "pull",
+    "body": [
+      "pull ${1|std,\"header.pollib\",<std>|}"
+    ],
+    "description": "Pull standard prelude or library header"
+  },
+  "Define Multi Group": {
+    "prefix": "define_multi",
+    "body": [
+      "define_multi {",
+      "\t(&)(${1:sender}, ${2:reciever}) {",
+      "\t\t${3:machine.host.sender};",
+      "\t\t${4:machine.host.reciever}",
+      "\t}",
+      "\t(&)(${5:ingress}, ${6:egress}) {",
+      "\t\t${7:machine.switch --unique}",
+      "\t}",
+      "\t&${8:switch} ${9:machine.switch --common}",
+      "\t&${10:cable} ${11:wire --common}",
+      "}"
+    ],
+    "description": "Batch define device and cable types"
+  },
+  "Simplified Topology": {
+    "prefix": "topology",
+    "body": [
+      "pull std",
+      "",
+      "topology ${1:Diamond}:",
+      "\tspawns {",
+      "\t\tspawn cable.high_speed as hi;",
+      "\t\tspawn cable.medium as med;",
+      "\t\tspawn ingress as s1;",
+      "\t\tspawn switch as s2, s3;",
+      "\t\tspawn egress as s4;",
+      "\t\tspawn sender as h1, h3;",
+      "\t\tspawn reciever as h2, h4;",
+      "\t}",
+      "",
+      "\tconnections {",
+      "\t\t(h1, hi, s1);",
+      "\t\t(h3, hi, s1);",
+      "\t\t(s1, med, s2);",
+      "\t\t(s1, med, s3);",
+      "\t\t(s2, med, s4);",
+      "\t\t(s3, med, s4);",
+      "\t\t(s4, hi, h2);",
+      "\t\t(s4, hi, h4);",
+      "\t}"
+    ],
+    "description": "Concise Prototype.pol topology definition"
+  },
   "Include Library": {
     "prefix": "include",
     "body": [

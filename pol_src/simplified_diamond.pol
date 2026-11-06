@@ -1,0 +1,23 @@
+pull std
+
+topology Diamond:
+    spawns {
+        spawn cable.high_speed as hi;
+        spawn cable.medium as med;
+        spawn ingress as s1;
+        spawn switch as s2, s3;
+        spawn egress as s4;
+        spawn sender as h1, h3;
+        spawn reciever as h2, h4;
+    }
+
+    connections {
+        (h1, hi, s1);
+        (h3, hi, s1);
+        (s1, med, s2);
+        (s1, med, s3);
+        (s2, med, s4);
+        (s3, med, s4);
+        (s4, hi, h2);
+        (s4, hi, h4);
+    }

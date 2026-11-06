@@ -163,3 +163,68 @@ class TestEndToEndCompilation:
         assert len(topo_def.switches) == expected_switches
         assert len(topo_def.hosts) == expected_hosts
         assert len(topo_def.links) > 0
+
+
+class TestSimplifiedSyntaxFeatures:
+    """Verifies simplified Prototype.pol language enhancements."""
+
+    def test_simplified_pull_directives(self):
+        preprocessor = Preprocessor()
+        p1 = preprocessor.resolve_target_path("std")
+        p2 = preprocessor.resolve_target_path('"std.pollib"')
+        p3 = preprocessor.resolve_target_path("<std>")
+        assert os.path.isfile(p1) and p1.endswith("std.pollib")
+        assert os.path.abspath(p1) == os.path.abspath(p2) == os.path.abspath(p3)
+
+    def test_define_multi_pairwise_and_broadcast(self):
+        code = """
+        define_multi {
+            (&)(s_node, r_node) {
+                machine.host.sender;
+                machine.host.reciever
+            }
+            (&)(ing, egr) {
+                machine.switch --unique
+            }
+            &core machine.switch --common
+        }
+        """
+        tokens = Lexer(code).tokenize()
+        ast = Parser(tokens).parse()
+        defines = [s for s in ast.statements if hasattr(s, "symbol")]
+        assert len(defines) == 5
+
+        by_symbol = {d.symbol: d for d in defines}
+        assert by_symbol["&s_node"].target_type == "machine.host.sender"
+        assert by_symbol["&r_node"].target_type == "machine.host.reciever"
+        assert by_symbol["&ing"].target_type == "machine.switch" and by_symbol["&ing"].is_unique
+        assert by_symbol["&egr"].target_type == "machine.switch" and by_symbol["&egr"].is_unique
+        assert by_symbol["&core"].target_type == "machine.switch" and by_symbol["&core"].is_common
+
+    def test_simplified_diamond_compilation(self):
+        compiler = PolCompiler()
+        data = compiler.compile_file(
+            "pol_src/simplified_diamond.pol",
+            output_path="topology_src/simplified_diamond.json"
+        )
+        assert data["format"] == "network-topology"
+        assert len(data["switches"]) == 4
+        assert len(data["hosts"]) == 4
+        assert len(data["links"]) == 8
+        assert "path_a" in data["paths"]
+
+        topo_def = load_topology("topology_src/simplified_diamond.json")
+        assert len(topo_def.switches) == 4
+        assert len(topo_def.hosts) == 4
+
+    def test_comments_support(self):
+        code = """
+        // Single-line C++ comment
+        /* Multi-line
+           block comment */
+        # Shell comment
+        pull std
+        """
+        tokens = Lexer(code).tokenize()
+        ast = Parser(tokens).parse()
+        assert len(ast.statements) == 1
