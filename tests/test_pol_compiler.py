@@ -171,9 +171,9 @@ class TestSimplifiedSyntaxFeatures:
     def test_simplified_pull_directives(self):
         preprocessor = Preprocessor()
         p1 = preprocessor.resolve_target_path("std")
-        p2 = preprocessor.resolve_target_path('"std.pollib"')
-        p3 = preprocessor.resolve_target_path("<std>")
-        assert os.path.isfile(p1) and p1.endswith("std.pollib")
+        p2 = preprocessor.resolve_target_path('"std.polh"')
+        p3 = preprocessor.resolve_target_path("<std.polh>")
+        assert os.path.isfile(p1) and p1.endswith("std.polh")
         assert os.path.abspath(p1) == os.path.abspath(p2) == os.path.abspath(p3)
 
     def test_define_multi_pairwise_and_broadcast(self):

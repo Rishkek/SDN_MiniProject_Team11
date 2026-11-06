@@ -413,7 +413,7 @@ class SemanticAnalyzer:
             self._ensure_host(node_id, alias, spawn_sym)
             return node_id
 
-        elif any(k in base for k in ("ingress", "egress", "switch")):
+        elif any(k in base for k in ("ingress", "egress", "switch", "hub")):
             # It's a switch
             s_idx = len(self.ir.switches) + 1
             node_id = f"s{s_idx}"

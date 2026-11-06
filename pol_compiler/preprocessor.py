@@ -30,12 +30,14 @@ class Preprocessor:
         # Check special alias for standard prelude or illustrative placeholder
         if target in ("std", "lib.std", "header files"):
             for p in self.search_paths:
-                cand = os.path.join(p, "std.pollib")
-                if os.path.isfile(cand):
-                    return os.path.abspath(cand)
-            root_std = os.path.join("lib", "std.pollib")
-            if os.path.isfile(root_std):
-                return os.path.abspath(root_std)
+                for cand_name in ("std.polh", "std.pollib"):
+                    cand = os.path.join(p, cand_name)
+                    if os.path.isfile(cand):
+                        return os.path.abspath(cand)
+            for cand_name in ("std.polh", "std.pollib"):
+                root_std = os.path.join("lib", cand_name)
+                if os.path.isfile(root_std):
+                    return os.path.abspath(root_std)
 
         # 1. Check for standard library targets like 'lib.machine' -> 'lib/machine.pollib'
         if target.startswith("lib."):

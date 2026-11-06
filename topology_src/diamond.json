@@ -130,6 +130,19 @@
       "is_bottleneck": true
     },
     {
+      "id": "link_s1_s3",
+      "src": "s1",
+      "dst": "s3",
+      "label": "Path B",
+      "bw_mbps": 10.0,
+      "delay_ms": 15.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
       "id": "link_s2_s4",
       "src": "s2",
       "dst": "s4",
@@ -143,19 +156,6 @@
       "is_bottleneck": true
     },
     {
-      "id": "link_s1_s3",
-      "src": "s1",
-      "dst": "s3",
-      "label": "Path B",
-      "bw_mbps": 10.0,
-      "delay_ms": 15.0,
-      "max_queue": 100,
-      "type": "switch_edge",
-      "cable_alias": "lo",
-      "path_segment": "path_b",
-      "is_bottleneck": true
-    },
-    {
       "id": "link_s3_s4",
       "src": "s3",
       "dst": "s4",
@@ -164,7 +164,7 @@
       "delay_ms": 15.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "lo",
+      "cable_alias": "med",
       "path_segment": "path_b",
       "is_bottleneck": true
     },

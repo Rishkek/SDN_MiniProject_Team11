@@ -1,72 +1,20 @@
-include lib.machine
-include lib.wire
-include lib.data
+pull "std.polh"
 
-define &sender machine.host.sender
-define &reciever machine.host.reciever
-define &switch machine.switch --common
-define &cable wire --common
-
-grid OFF
-
-
-detail sender:
-    data send_rate;
-    data.out(send_rate, 100@kilo);
-    sender::field.rate("out") = send_rate;
-
-detail reciever:
-    data recieve_rate;
-    data.in(recieve_rate, 300@kilo);
-    reciever::field.rate("in") = recieve_rate;
-
-detail cable:
-    instance high_speed
-    instance medium
-
-    data rate;
-
-    detail high_speed:
-        data.flow(rate, 100@mega);
-        high_speed::field.rate("any") = rate;
-
-    detail medium:
-        data.flow(rate, 10@mega);
-        medium::field.rate("any") = rate;
-
-
-detail machine.topology.layout:
-
-    machine bundle[16];
-
-    __SPAWNS__ {
-        spawn cable.high_speed 4 alias hi;
-        spawn cable.medium 3 alias med;
-        spawn switch alias s1;
-        spawn switch alias s2;
-        spawn switch alias s3;
-        spawn switch alias s4;
-        spawn sender alias h1;
-        spawn sender alias h3;
-        spawn reciever alias h2;
-        spawn reciever alias h4;
-    }@bundle #padding=0
-
-
-    __CONNECTIONS__ {
-        unpack bundle;
-
-        connect_multi {
-            (h1, hi, s1);
-            (h3, hi, s2);
-            (s1, med, s2);
-            (s2, med, s3);
-            (s3, med, s4);
-            (s3, hi, h4);
-            (s4, hi, h2);
-        }
+topology Bus:
+    spawns {
+        spawn cable.high_speed as hi;
+        spawn cable.medium as med;
+        spawn switch as s1, s2, s3, s4;
+        spawn sender as h1, h3;
+        spawn reciever as h2, h4;
     }
 
-
-deploy:
-    machine.topology.layout;
+    connections {
+        (h1, hi, s1);
+        (h3, hi, s2);
+        (s1, med, s2);
+        (s2, med, s3);
+        (s3, med, s4);
+        (s3, hi, h4);
+        (s4, hi, h2);
+    }
