@@ -1888,6 +1888,8 @@ class MasterSDNGUI(QMainWindow):
         self.main_sender: Optional[UDPSender] = None
         self.is_cross_burst_active = False
 
+        self.topo_canvas: Optional[AnimatedTopologyCanvas] = None
+
         self._last_flow_text = ""
         self._last_active_path_status = ""
         self._last_recovery_time_sec = None
@@ -1961,18 +1963,29 @@ class MasterSDNGUI(QMainWindow):
         act_bench.triggered.connect(lambda: self.bench_widget.start_benchmark())
         menu_sim.addAction(act_bench)
 
+    @property
+    def canvas(self):
+        """Property alias for backward-compatibility with canvas references."""
+        return getattr(self, "topo_canvas", None)
+
+    @canvas.setter
+    def canvas(self, val):
+        self.topo_canvas = val
+
     def _open_topology_dialog(self):
         """Dispatches open topology dialog to the canvas widget."""
-        if hasattr(self, "topo_canvas") and self.topo_canvas:
-            self.topo_canvas._open_topology_file_dialog()
+        canvas = self.canvas
+        if canvas:
+            canvas._open_topology_file_dialog()
 
     def _save_topology_dialog(self):
         """Opens file explorer to save the active topology as .pol, .pollib, or .json."""
-        if not hasattr(self, "topo_canvas") or not self.topo_canvas or not self.topo_canvas.topo_def:
+        canvas = self.canvas
+        if not canvas or not canvas.topo_def:
             QMessageBox.information(self, "No Active Topology", "There is no active topology loaded to save.")
             return
 
-        start_dir = getattr(self.topo_canvas, "_last_topo_dir", None)
+        start_dir = getattr(canvas, "_last_topo_dir", None)
         if not start_dir or not os.path.isdir(start_dir):
             cand_pol_src = os.path.join(os.getcwd(), "pol_src")
             start_dir = cand_pol_src if os.path.isdir(cand_pol_src) else os.getcwd()
@@ -1988,20 +2001,20 @@ class MasterSDNGUI(QMainWindow):
         if not filepath:
             return
 
-        self.topo_canvas._last_topo_dir = os.path.dirname(os.path.abspath(filepath))
+        canvas._last_topo_dir = os.path.dirname(os.path.abspath(filepath))
 
         try:
             if filepath.lower().endswith(".pol") or "(*.pol)" in selected_filter:
                 if not filepath.lower().endswith(".pol"):
                     filepath += ".pol"
-                code = self._generate_pol_source(self.topo_canvas.topo_def)
+                code = self._generate_pol_source(canvas.topo_def)
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(code)
                 QMessageBox.information(self, "Topology Saved", f"Successfully saved Prototype.pol source:\n{filepath}")
             elif filepath.lower().endswith(".pollib") or "(*.pollib)" in selected_filter:
                 if not filepath.lower().endswith(".pollib"):
                     filepath += ".pollib"
-                code = self._generate_pollib_source(self.topo_canvas.topo_def)
+                code = self._generate_pollib_source(canvas.topo_def)
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(code)
                 QMessageBox.information(self, "Topology Header Saved", f"Successfully saved Prototype.pollib header:\n{filepath}")
@@ -2009,7 +2022,7 @@ class MasterSDNGUI(QMainWindow):
                 if not filepath.lower().endswith(".json"):
                     filepath += ".json"
                 from src.topology_loader import save_topology
-                save_topology(self.topo_canvas.topo_def, filepath)
+                save_topology(canvas.topo_def, filepath)
                 QMessageBox.information(self, "Topology Saved", f"Successfully saved topology JSON:\n{filepath}")
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save topology file:\n{e}")

@@ -222,12 +222,12 @@ def interactive_menu():
         print("  [9] Exit")
         print("-" * 65)
 
-        choice = input("Enter choice [1-9]: ").strip()
-        if choice == "1":
+        choice = input("Enter choice [1-9, or 'q' to exit]: ").strip().lower()
+        if choice in ("1", "demo"):
             run_interactive_demo()
-        elif choice == "2":
+        elif choice in ("2", "bench", "benchmark"):
             run_benchmark_mode()
-        elif choice == "3":
+        elif choice in ("3", "mininet"):
             run_mininet_mode()
         elif choice == "4":
             target = input("Target IP [127.0.0.1]: ").strip() or "127.0.0.1"
@@ -251,15 +251,15 @@ def interactive_menu():
                 sys.executable, os.path.join(BASE_DIR, "src", "congestion_generator.py"),
                 "--rate", str(rate), "--duration", str(dur)
             ])
-        elif choice == "7":
+        elif choice in ("7", "test"):
             run_test_suite()
-        elif choice == "8":
+        elif choice in ("8", "rubric"):
             show_rubric_mapping()
-        elif choice == "9":
+        elif choice in ("9", "q", "quit", "exit"):
             print("\nExiting. Thank you!")
             break
         else:
-            print("[!] Invalid option. Please select 1-9.")
+            print("[!] Invalid option. Please select 1-9 (or 'q' to exit).")
 
         input("\nPress Enter to return to main menu...")
 
@@ -304,6 +304,15 @@ def run_packet_monitor():
 
 def launch_gui_dashboard():
     """Launches the master PyQt6 Graphical User Interface."""
+    # Check for display server on Linux to avoid Wayland/XCB crashes in headless environments
+    if sys.platform.startswith("linux") and "QT_QPA_PLATFORM" not in os.environ:
+        if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+            print("[*] No graphical display detected (DISPLAY/WAYLAND_DISPLAY unset). Falling back to interactive CLI menu...")
+            interactive_menu()
+            return
+        elif "WAYLAND_DISPLAY" not in os.environ and "DISPLAY" in os.environ:
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
+
     try:
         from src.gui_app import main as run_gui
         print("[+] Launching Master PyQt6 GUI Dashboard...")
