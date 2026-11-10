@@ -12,7 +12,7 @@
       "protocols": "OpenFlow13",
       "subtext": "Ingress",
       "x": 0.26,
-      "y": 0.5
+      "y": 0.50
     },
     {
       "id": "s2",
@@ -21,7 +21,7 @@
       "role": "primary",
       "protocols": "OpenFlow13",
       "subtext": "Primary",
-      "x": 0.5,
+      "x": 0.50,
       "y": 0.22
     },
     {
@@ -31,7 +31,7 @@
       "role": "backup",
       "protocols": "OpenFlow13",
       "subtext": "Backup",
-      "x": 0.5,
+      "x": 0.50,
       "y": 0.78
     },
     {
@@ -42,7 +42,7 @@
       "protocols": "OpenFlow13",
       "subtext": "Egress",
       "x": 0.74,
-      "y": 0.5
+      "y": 0.50
     }
   ],
   "hosts": [
@@ -135,7 +135,7 @@
       "dst": "s3",
       "label": "Path B",
       "bw_mbps": 10.0,
-      "delay_ms": 15.0,
+      "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
       "cable_alias": "med",
@@ -161,7 +161,7 @@
       "dst": "s4",
       "label": "Path B (egress)",
       "bw_mbps": 10.0,
-      "delay_ms": 15.0,
+      "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
       "cable_alias": "med",

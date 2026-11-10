@@ -11,7 +11,7 @@
       "role": "ingress",
       "protocols": "OpenFlow13",
       "subtext": "Ingress",
-      "x": 0.3,
+      "x": 0.30,
       "y": 0.33
     },
     {
@@ -21,7 +21,7 @@
       "role": "primary",
       "protocols": "OpenFlow13",
       "subtext": "Primary",
-      "x": 0.7,
+      "x": 0.70,
       "y": 0.33
     },
     {
@@ -31,7 +31,7 @@
       "role": "backup",
       "protocols": "OpenFlow13",
       "subtext": "Backup",
-      "x": 0.3,
+      "x": 0.70,
       "y": 0.67
     },
     {
@@ -41,7 +41,7 @@
       "role": "core",
       "protocols": "OpenFlow13",
       "subtext": "Core",
-      "x": 0.7,
+      "x": 0.30,
       "y": 0.67
     }
   ],
@@ -65,7 +65,7 @@
       "subtext": "10.0.0.2",
       "color": "#a6e3a1",
       "connected_to": "s4",
-      "x": 0.84,
+      "x": 0.16,
       "y": 0.75
     },
     {
@@ -76,7 +76,7 @@
       "subtext": "10.0.0.3",
       "color": "#f38ba8",
       "connected_to": "s3",
-      "x": 0.16,
+      "x": 0.84,
       "y": 0.75
     },
     {
@@ -148,7 +148,7 @@
       "dst": "s3",
       "label": "Path B (egress)",
       "bw_mbps": 10.0,
-      "delay_ms": 15.0,
+      "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
       "cable_alias": "med",
@@ -159,9 +159,9 @@
       "id": "link_s3_s1",
       "src": "s3",
       "dst": "s1",
-      "label": "Path B (egress)",
+      "label": "Path B",
       "bw_mbps": 10.0,
-      "delay_ms": 15.0,
+      "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
       "cable_alias": "med",

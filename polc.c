@@ -23,10 +23,12 @@
 #endif
 
 #ifdef _WIN32
+#include <windows.h>
 #include <io.h>
 #include <direct.h>
 #define PATH_SEP '\\'
 #else
+#include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #define PATH_SEP '/'
@@ -412,10 +414,10 @@ typedef enum {
     TOK_KW_DEFINE,
     TOK_KW_DEFINE_MULTI,
     TOK_MODIFIER
-} TokenType;
+} PolTokenType;
 
 typedef struct {
-    TokenType type;
+    PolTokenType type;
     char text[MAX_STR];
 } Token;
 
@@ -1587,30 +1589,56 @@ int main(int argc, char *argv[]) {
     }
 
     if (compile_all) {
-        const char *known_files[] = {
-            "pol_src/diamond.pol",
-            "pol_src/star.pol",
-            "pol_src/bus.pol",
-            "pol_src/ring.pol",
-            "pol_src/mesh.pol",
-            "pol_src/test.pol"
-        };
-        int num_files = 6;
         bool all_ok = true;
-
-        for (int i = 0; i < num_files; i++) {
-            if (!file_exists(known_files[i])) continue;
-            char base[MAX_STR];
-            get_basename(known_files[i], base);
-            char out_json[512];
-            snprintf(out_json, sizeof(out_json), "topology_src/%s.json", base);
-
-            if (compile_file(known_files[i], out_json, type)) {
-                printf("[SUCCESS] Compiled %s -> %s\n", known_files[i], out_json);
-            } else {
-                printf("[ERROR] Failed compiling %s\n", known_files[i]);
-                all_ok = false;
+        int found_count = 0;
+#ifdef _WIN32
+        WIN32_FIND_DATAA fd;
+        HANDLE hFind = FindFirstFileA("pol_src\\*.pol", &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                    char *dot = strrchr(fd.cFileName, '.');
+                    if (!dot || strcmp(dot, ".pol") != 0) continue;
+                    found_count++;
+                    char in_path[512], out_path[512], base[MAX_STR];
+                    snprintf(in_path, sizeof(in_path), "pol_src/%s", fd.cFileName);
+                    get_basename(fd.cFileName, base);
+                    snprintf(out_path, sizeof(out_path), "topology_src/%s.json", base);
+                    if (compile_file(in_path, out_path, type)) {
+                        printf("[SUCCESS] Compiled %s -> %s\n", in_path, out_path);
+                    } else {
+                        printf("[ERROR] Failed compiling %s\n", in_path);
+                        all_ok = false;
+                    }
+                }
+            } while (FindNextFileA(hFind, &fd));
+            FindClose(hFind);
+        }
+#else
+        DIR *d = opendir("pol_src");
+        if (d) {
+            struct dirent *de;
+            while ((de = readdir(d)) != NULL) {
+                char *dot = strrchr(de->d_name, '.');
+                if (dot && strcmp(dot, ".pol") == 0) {
+                    found_count++;
+                    char in_path[512], out_path[512], base[MAX_STR];
+                    snprintf(in_path, sizeof(in_path), "pol_src/%s", de->d_name);
+                    get_basename(de->d_name, base);
+                    snprintf(out_path, sizeof(out_path), "topology_src/%s.json", base);
+                    if (compile_file(in_path, out_path, type)) {
+                        printf("[SUCCESS] Compiled %s -> %s\n", in_path, out_path);
+                    } else {
+                        printf("[ERROR] Failed compiling %s\n", in_path);
+                        all_ok = false;
+                    }
+                }
             }
+            closedir(d);
+        }
+#endif
+        if (found_count == 0) {
+            printf("[INFO] No .pol files found in pol_src/\n");
         }
         return all_ok ? 0 : 1;
     }

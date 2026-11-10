@@ -221,17 +221,22 @@ class AnimatedTopologyCanvas(QWidget):
         target_json = filepath
         if filepath.lower().endswith(".pol"):
             try:
-                from pol_compiler import compile_pol_file
+                import subprocess
                 base_name = os.path.splitext(os.path.basename(filepath))[0]
                 out_dir = os.path.join(os.getcwd(), "topology_src")
                 os.makedirs(out_dir, exist_ok=True)
                 target_json = os.path.join(out_dir, f"{base_name}.json")
-                compile_pol_file(filepath, output_path=target_json)
+                polc_bin = os.path.join(os.getcwd(), "polc.exe" if os.name == "nt" else "polc")
+                if not os.path.isfile(polc_bin):
+                    polc_bin = "polc.exe" if os.name == "nt" else "polc"
+                res = subprocess.run([polc_bin, filepath, "-o", target_json], capture_output=True, text=True)
+                if res.returncode != 0:
+                    raise RuntimeError(res.stderr or res.stdout or f"polc returned exit code {res.returncode}")
             except Exception as comp_err:
                 QMessageBox.critical(
                     self,
                     "Compilation Error",
-                    f"Failed to compile '{os.path.basename(filepath)}':\n{comp_err}"
+                    f"Failed to compile '{os.path.basename(filepath)}' via native C compiler (polc):\n{comp_err}"
                 )
                 return
         elif not filepath.lower().endswith(TOPOLOGY_FILE_EXTENSION):

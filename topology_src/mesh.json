@@ -18,9 +18,9 @@
       "id": "s2",
       "dpid": 2,
       "name": "S2",
-      "role": "primary",
+      "role": "core",
       "protocols": "OpenFlow13",
-      "subtext": "Primary",
+      "subtext": "Core",
       "x": 0.65,
       "y": 0.32
     },
@@ -28,9 +28,9 @@
       "id": "s3",
       "dpid": 3,
       "name": "S3",
-      "role": "primary",
+      "role": "core",
       "protocols": "OpenFlow13",
-      "subtext": "Primary",
+      "subtext": "Core",
       "x": 0.35,
       "y": 0.68
     },
@@ -54,7 +54,7 @@
       "subtext": "10.0.0.1",
       "color": "#1e66f5",
       "connected_to": "s1",
-      "x": 0.1,
+      "x": 0.10,
       "y": 0.28
     },
     {
@@ -65,7 +65,7 @@
       "subtext": "10.0.0.2",
       "color": "#a6e3a1",
       "connected_to": "s4",
-      "x": 0.9,
+      "x": 0.90,
       "y": 0.28
     },
     {
@@ -76,7 +76,7 @@
       "subtext": "10.0.0.3",
       "color": "#f38ba8",
       "connected_to": "s1",
-      "x": 0.1,
+      "x": 0.10,
       "y": 0.72
     },
     {
@@ -87,7 +87,7 @@
       "subtext": "10.0.0.4",
       "color": "#df8e1d",
       "connected_to": "s4",
-      "x": 0.9,
+      "x": 0.90,
       "y": 0.72
     }
   ],
@@ -120,14 +120,12 @@
       "id": "link_s1_s2",
       "src": "s1",
       "dst": "s2",
-      "label": "Path B",
+      "label": "S1->S2",
       "bw_mbps": 10.0,
       "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "med",
-      "path_segment": "path_b",
-      "is_bottleneck": true
+      "cable_alias": "med"
     },
     {
       "id": "link_s1_s3",
@@ -135,7 +133,7 @@
       "dst": "s3",
       "label": "S1->S3",
       "bw_mbps": 10.0,
-      "delay_ms": 15.0,
+      "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
       "cable_alias": "med"
@@ -144,51 +142,47 @@
       "id": "link_s1_s4",
       "src": "s1",
       "dst": "s4",
-      "label": "S1->S4",
-      "bw_mbps": 10.0,
+      "label": "Path A",
+      "bw_mbps": 5.0,
       "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "lo"
+      "cable_alias": "lo",
+      "path_segment": "path_a",
+      "is_bottleneck": true
     },
     {
       "id": "link_s2_s3",
       "src": "s2",
       "dst": "s3",
-      "label": "Path A (egress)",
+      "label": "S2->S3",
       "bw_mbps": 10.0,
-      "delay_ms": 15.0,
+      "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "med",
-      "path_segment": "path_a",
-      "is_bottleneck": true
+      "cable_alias": "med"
     },
     {
       "id": "link_s2_s4",
       "src": "s2",
       "dst": "s4",
-      "label": "Path B (egress)",
+      "label": "S2->S4",
       "bw_mbps": 10.0,
       "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "med",
-      "path_segment": "path_b",
-      "is_bottleneck": true
+      "cable_alias": "med"
     },
     {
       "id": "link_s3_s4",
       "src": "s3",
       "dst": "s4",
-      "label": "Path A (egress)",
+      "label": "S3->S4",
       "bw_mbps": 10.0,
-      "delay_ms": 15.0,
+      "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "med",
-      "path_segment": "path_a",
-      "is_bottleneck": true
+      "cable_alias": "med"
     },
     {
       "id": "link_s4_h2",
@@ -218,32 +212,16 @@
   "paths": {
     "path_a": {
       "id": "path_a",
-      "name": "Path-A (S1 -> S2 -> S3 -> S4)",
+      "name": "Path-A (S1 -> S4)",
       "role": "primary",
       "hops": [
         "s1",
-        "s2",
-        "s3",
         "s4"
       ],
       "delay_ms": 5.0,
       "capacity_mbps": 10.0,
       "queue_limit": 100,
       "s1_output_port": 2
-    },
-    "path_b": {
-      "id": "path_b",
-      "name": "Path-B (S1 -> S2 -> S4)",
-      "role": "alternate",
-      "hops": [
-        "s1",
-        "s2",
-        "s4"
-      ],
-      "delay_ms": 15.0,
-      "capacity_mbps": 10.0,
-      "queue_limit": 100,
-      "s1_output_port": 3
     }
   },
   "traffic_profile": {

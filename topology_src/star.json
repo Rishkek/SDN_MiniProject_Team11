@@ -11,8 +11,8 @@
       "role": "ingress",
       "protocols": "OpenFlow13",
       "subtext": "Ingress",
-      "x": 0.5,
-      "y": 0.5
+      "x": 0.50,
+      "y": 0.50
     }
   ],
   "hosts": [
@@ -24,7 +24,7 @@
       "subtext": "10.0.0.1",
       "color": "#1e66f5",
       "connected_to": "s1",
-      "x": 0.5,
+      "x": 0.50,
       "y": 0.17
     },
     {
@@ -36,7 +36,7 @@
       "color": "#a6e3a1",
       "connected_to": "s1",
       "x": 0.83,
-      "y": 0.5
+      "y": 0.50
     },
     {
       "id": "h3",
@@ -46,7 +46,7 @@
       "subtext": "10.0.0.3",
       "color": "#f38ba8",
       "connected_to": "s1",
-      "x": 0.5,
+      "x": 0.50,
       "y": 0.83
     },
     {
@@ -58,7 +58,7 @@
       "color": "#df8e1d",
       "connected_to": "s1",
       "x": 0.17,
-      "y": 0.5
+      "y": 0.50
     }
   ],
   "links": [
