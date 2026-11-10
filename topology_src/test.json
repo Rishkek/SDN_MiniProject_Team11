@@ -18,9 +18,9 @@
       "id": "s2",
       "dpid": 2,
       "name": "S2",
-      "role": "core",
+      "role": "backup",
       "protocols": "OpenFlow13",
-      "subtext": "Core",
+      "subtext": "Backup",
       "x": 0.80,
       "y": 0.71
     },
@@ -28,9 +28,9 @@
       "id": "s3",
       "dpid": 3,
       "name": "S3",
-      "role": "core",
+      "role": "backup",
       "protocols": "OpenFlow13",
-      "subtext": "Core",
+      "subtext": "Backup",
       "x": 0.37,
       "y": 0.85
     },
@@ -38,9 +38,9 @@
       "id": "s4",
       "dpid": 4,
       "name": "S4",
-      "role": "core",
+      "role": "backup",
       "protocols": "OpenFlow13",
-      "subtext": "Core",
+      "subtext": "Backup",
       "x": 0.10,
       "y": 0.64
     },
@@ -96,12 +96,14 @@
       "id": "link_s1_s2",
       "src": "s1",
       "dst": "s2",
-      "label": "S1->S2",
+      "label": "Path B",
       "bw_mbps": 10.0,
       "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "hi"
+      "cable_alias": "hi",
+      "path_segment": "path_b",
+      "is_bottleneck": true
     },
     {
       "id": "link_s2_s3",
@@ -112,7 +114,9 @@
       "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "hi"
+      "cable_alias": "hi",
+      "path_segment": "path_b",
+      "is_bottleneck": true
     },
     {
       "id": "link_s3_s4",
@@ -123,7 +127,9 @@
       "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "hi"
+      "cable_alias": "hi",
+      "path_segment": "path_b",
+      "is_bottleneck": true
     },
     {
       "id": "link_s4_s5",
@@ -134,7 +140,9 @@
       "delay_ms": 5.0,
       "max_queue": 100,
       "type": "switch_edge",
-      "cable_alias": "hi"
+      "cable_alias": "hi",
+      "path_segment": "path_b",
+      "is_bottleneck": true
     },
     {
       "id": "link_s1_s5",
@@ -175,6 +183,22 @@
       "capacity_mbps": 10.0,
       "queue_limit": 100,
       "s1_output_port": 2
+    },
+    "path_b": {
+      "id": "path_b",
+      "name": "Path-B (S1 -> S2 -> S3 -> S4 -> S5)",
+      "role": "alternate",
+      "hops": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "delay_ms": 20.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 3
     }
   },
   "traffic_profile": {

@@ -146,7 +146,7 @@
       "id": "link_s2_s4",
       "src": "s2",
       "dst": "s4",
-      "label": "Path A (egress)",
+      "label": "S2->S4",
       "bw_mbps": 10.0,
       "delay_ms": 5.0,
       "max_queue": 100,
@@ -159,7 +159,7 @@
       "id": "link_s3_s4",
       "src": "s3",
       "dst": "s4",
-      "label": "Path B (egress)",
+      "label": "S3->S4",
       "bw_mbps": 10.0,
       "delay_ms": 5.0,
       "max_queue": 100,
@@ -203,7 +203,7 @@
         "s2",
         "s4"
       ],
-      "delay_ms": 5.0,
+      "delay_ms": 10.0,
       "capacity_mbps": 10.0,
       "queue_limit": 100,
       "s1_output_port": 2
@@ -217,7 +217,7 @@
         "s3",
         "s4"
       ],
-      "delay_ms": 15.0,
+      "delay_ms": 10.0,
       "capacity_mbps": 10.0,
       "queue_limit": 100,
       "s1_output_port": 3

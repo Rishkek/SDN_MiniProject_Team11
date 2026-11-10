@@ -167,30 +167,49 @@ class NetworkEmulator:
         self.packet_callbacks = []
         self._monitor_sock = None
 
-        # Build virtual links for Path A and Path B
+        # Build virtual links for all paths
         self.link_path_a = SimulatedLink("Path-A (S1->S2->S4)", capacity_mbps=LINK_CAPACITY_MBPS, delay_ms=PATH_A_DELAY_MS)
         self.link_path_b = SimulatedLink("Path-B (S1->S3->S4)", capacity_mbps=LINK_CAPACITY_MBPS, delay_ms=PATH_B_DELAY_MS)
+        self.path_links: Dict[str, SimulatedLink] = {
+            "path_a": self.link_path_a,
+            "path_b": self.link_path_b
+        }
 
     def apply_topology(self, topo):
-        """Applies link and path parameters from a loaded TopologyDefinition."""
-        path_a_info = topo.get_path("path_a")
-        path_b_info = topo.get_path("path_b")
+        """Applies link and path parameters from a loaded TopologyDefinition across all paths."""
+        # Update controller with all paths
+        if hasattr(self.controller, "set_available_paths") and topo.paths:
+            self.controller.set_available_paths(topo.paths)
 
-        if path_a_info:
-            cap_a = float(path_a_info.get("capacity_mbps", 10.0))
-            delay_a = float(path_a_info.get("delay_ms", 5.0))
-            q_a = int(path_a_info.get("queue_limit", 100))
-            self.link_path_a.set_capacity_mbps(cap_a)
-            self.link_path_a.delay_sec = delay_a / 1000.0
-            self.link_path_a.set_max_queue(q_a)
+        def forward_to_dest(pkt_data, dest_addr):
+            try:
+                if self._out_sock:
+                    self._out_sock.sendto(pkt_data, dest_addr)
+            except OSError:
+                pass
 
-        if path_b_info:
-            cap_b = float(path_b_info.get("capacity_mbps", 10.0))
-            delay_b = float(path_b_info.get("delay_ms", 15.0))
-            q_b = int(path_b_info.get("queue_limit", 100))
-            self.link_path_b.set_capacity_mbps(cap_b)
-            self.link_path_b.delay_sec = delay_b / 1000.0
-            self.link_path_b.set_max_queue(q_b)
+        for p_id, p_info in (topo.paths or {}).items():
+            cap = float(p_info.get("capacity_mbps", 10.0))
+            delay = float(p_info.get("delay_ms", 5.0))
+            q_lim = int(p_info.get("queue_limit", 100))
+            name = p_info.get("name", f"Path-{p_id.upper()}")
+
+            if p_id not in self.path_links:
+                sim_link = SimulatedLink(name, capacity_mbps=cap, delay_ms=delay, max_queue=q_lim)
+                if self._running:
+                    sim_link.start(forward_to_dest)
+                self.path_links[p_id] = sim_link
+            else:
+                sim_link = self.path_links[p_id]
+                sim_link.name = name
+                sim_link.set_capacity_mbps(cap)
+                sim_link.set_delay_ms(delay)
+                sim_link.set_max_queue(q_lim)
+
+        if "path_a" in self.path_links:
+            self.link_path_a = self.path_links["path_a"]
+        if "path_b" in self.path_links:
+            self.link_path_b = self.path_links["path_b"]
 
     def register_packet_callback(self, cb):
         """Registers a callback function to receive packet transmission events."""
@@ -231,8 +250,8 @@ class NetworkEmulator:
             except OSError:
                 pass
 
-        self.link_path_a.start(forward_to_dest)
-        self.link_path_b.start(forward_to_dest)
+        for link in self.path_links.values():
+            link.start(forward_to_dest)
 
         self._running = True
         self._relay_thread = threading.Thread(target=self._switch_relay_loop, daemon=True)
@@ -240,8 +259,8 @@ class NetworkEmulator:
 
     def stop(self):
         self._running = False
-        self.link_path_a.stop()
-        self.link_path_b.stop()
+        for link in self.path_links.values():
+            link.stop()
         if self._sock:
             self._sock.close()
         if self._out_sock:
@@ -255,11 +274,11 @@ class NetworkEmulator:
 
     def _dispatch_packet_event(self, seq: int, flow_id: int, size: int, active_link: SimulatedLink, is_forwarded: bool):
         now_str = time.strftime("%H:%M:%S") + f".{int((time.time() % 1) * 1000):03d}"
-        path_name = "Path-A" if active_link == self.link_path_a else "Path-B"
+        path_name = active_link.name if active_link else "Path-A"
         flow_name = "MAIN" if flow_id == FLOW_MAIN else "CROSS"
         status = "FORWARDED" if is_forwarded else "DROPPED (Queue Overflow)"
-        q_cur = self.link_path_a.packet_queue.qsize()
-        q_max = self.link_path_a.max_queue
+        q_cur = active_link.packet_queue.qsize() if active_link else self.link_path_a.packet_queue.qsize()
+        q_max = active_link.max_queue if active_link else self.link_path_a.max_queue
         evt = {
             "time": now_str,
             "flow": flow_name,
@@ -270,7 +289,7 @@ class NetworkEmulator:
             "queue": f"{q_cur}/{q_max}",
             "status": status,
             "is_dropped": not is_forwarded,
-            "is_rerouted": (flow_id == FLOW_MAIN and active_link == self.link_path_b)
+            "is_rerouted": (flow_id == FLOW_MAIN and active_link != self.link_path_a)
         }
         for cb in self.packet_callbacks:
             try:
@@ -292,9 +311,10 @@ class NetworkEmulator:
         while self._running:
             now = time.time()
             if now - last_telemetry >= 0.25:
-                # Feed virtual switch port statistics to controller (offered load to switch ports)
-                self.controller.record_external_stats("s1", port_no=2, rx_bytes=self.link_path_a.rx_bytes, tx_bytes=self.link_path_a.rx_bytes)
-                self.controller.record_external_stats("s1", port_no=3, rx_bytes=self.link_path_b.rx_bytes, tx_bytes=self.link_path_b.rx_bytes)
+                # Feed virtual switch port statistics to controller for all dynamic paths
+                for p_id, link in self.path_links.items():
+                    port_no = self.controller.path_ports.get(p_id, 2 if p_id == "path_a" else 3)
+                    self.controller.record_external_stats("s1", port_no=port_no, rx_bytes=link.rx_bytes, tx_bytes=link.rx_bytes)
                 last_telemetry = now
 
             try:
@@ -318,15 +338,14 @@ class NetworkEmulator:
             dest = None
             if flow_id == FLOW_MAIN:
                 dest = ("127.0.0.1", self.main_dest_port)
-                # Query controller for current active path
-                if self.controller.current_active_path == PATH_PRIMARY:
-                    active_link = self.link_path_a
-                else:
-                    active_link = self.link_path_b
+                # Query controller for current active path dynamically
+                active_path_key = self.controller.current_active_path
+                active_id = getattr(self.controller, "_normalize_path_id", lambda x: x)(active_path_key)
+                active_link = self.path_links.get(active_id) or self.path_links.get(active_path_key) or self.link_path_a
 
             elif flow_id == FLOW_CROSS:
                 dest = ("127.0.0.1", self.cross_dest_port)
-                # Cross-traffic always flows through Path A to create congestion
+                # Cross-traffic flows through Path A bottleneck
                 active_link = self.link_path_a
 
             if active_link and dest:

@@ -1015,6 +1015,36 @@ static int find_or_add_node(Topology *topo, const char *alias, ParseResult *res,
     return topo->node_count - 1;
 }
 
+static void find_simple_paths_dfs(
+    int curr, int target, int visited[], int path[], int len,
+    int all_paths[MAX_PATHS][MAX_HOPS], int path_lens[MAX_PATHS], int *total_found,
+    int sw_count, int adj[MAX_NODES][MAX_NODES]
+) {
+    if (*total_found >= MAX_PATHS) return;
+    visited[curr] = 1;
+    path[len++] = curr;
+
+    if (curr == target) {
+        if (len >= 2) {
+            for (int i = 0; i < len; i++) {
+                all_paths[*total_found][i] = path[i];
+            }
+            path_lens[*total_found] = len;
+            (*total_found)++;
+        }
+    } else {
+        for (int next = 0; next < sw_count; next++) {
+            if (adj[curr][next] && !visited[next]) {
+                find_simple_paths_dfs(next, target, visited, path, len,
+                                      all_paths, path_lens, total_found,
+                                      sw_count, adj);
+            }
+        }
+    }
+
+    visited[curr] = 0;
+}
+
 static void synthesize_paths(Topology *topo) {
     // Find Ingress and Egress switches
     char ingress[MAX_STR] = {0};
@@ -1076,154 +1106,107 @@ static void synthesize_paths(Topology *topo) {
 
     if (start_sw < 0 || end_sw < 0 || start_sw == end_sw) return;
 
-    // BFS / DFS for up to 2 distinct paths
+    // DFS to discover ALL simple loop-free paths between Ingress and Egress
     int visited[MAX_NODES] = {0};
-    int queue[MAX_NODES];
-    int parent[MAX_NODES];
-    for (int i = 0; i < MAX_NODES; i++) parent[i] = -1;
+    int cur_path[MAX_HOPS];
+    int all_paths[MAX_PATHS][MAX_HOPS];
+    int path_lens[MAX_PATHS] = {0};
+    int total_found = 0;
 
-    int qhead = 0, qtail = 0;
-    queue[qtail++] = start_sw;
-    visited[start_sw] = 1;
+    find_simple_paths_dfs(start_sw, end_sw, visited, cur_path, 0,
+                          all_paths, path_lens, &total_found,
+                          sw_count, adj);
 
-    while (qhead < qtail) {
-        int curr = queue[qhead++];
-        if (curr == end_sw) break;
-        for (int next = 0; next < sw_count; next++) {
-            if (adj[curr][next] && !visited[next]) {
-                visited[next] = 1;
-                parent[next] = curr;
-                queue[qtail++] = next;
+    // Sort paths by hop length ascending (shortest hop path is primary)
+    for (int i = 0; i < total_found - 1; i++) {
+        for (int j = i + 1; j < total_found; j++) {
+            if (path_lens[j] < path_lens[i]) {
+                int tmp_l = path_lens[i];
+                path_lens[i] = path_lens[j];
+                path_lens[j] = tmp_l;
+                for (int h = 0; h < MAX_HOPS; h++) {
+                    int tmp_h = all_paths[i][h];
+                    all_paths[i][h] = all_paths[j][h];
+                    all_paths[j][h] = tmp_h;
+                }
             }
         }
     }
 
-    if (visited[end_sw]) {
-        // Trace Path A
-        int trace[MAX_HOPS];
-        int tlen = 0;
-        int cur = end_sw;
-        while (cur != -1 && tlen < MAX_HOPS) {
-            trace[tlen++] = cur;
-            cur = parent[cur];
+    // Register all discovered unique paths
+    for (int p_idx = 0; p_idx < total_found && topo->path_count < MAX_PATHS; p_idx++) {
+        int tlen = path_lens[p_idx];
+        TopoPath *p = &topo->paths[topo->path_count++];
+
+        if (p_idx == 0) {
+            strcpy(p->id, "path_a");
+            strcpy(p->role, "primary");
+        } else if (p_idx == 1) {
+            strcpy(p->id, "path_b");
+            strcpy(p->role, "alternate");
+        } else if (p_idx == 2) {
+            strcpy(p->id, "path_c");
+            strcpy(p->role, "backup");
+        } else if (p_idx == 3) {
+            strcpy(p->id, "path_d");
+            strcpy(p->role, "backup");
+        } else {
+            snprintf(p->id, sizeof(p->id), "path_%c", 'a' + p_idx);
+            strcpy(p->role, "backup");
         }
 
-        TopoPath *pa = &topo->paths[topo->path_count++];
-        strcpy(pa->id, "path_a");
-        strcpy(pa->role, "primary");
-        pa->hop_count = tlen;
-        pa->delay_ms = 5.0;
-        pa->capacity_mbps = 10.0;
-        pa->queue_limit = 100;
-        pa->s1_output_port = 2;
+        p->hop_count = tlen;
+        p->delay_ms = (tlen > 1) ? (5.0 * (tlen - 1)) : 5.0;
+        p->capacity_mbps = 10.0;
+        p->queue_limit = 100;
+        p->s1_output_port = p_idx + 2;
 
         char path_str[MAX_STR] = {0};
         for (int i = 0; i < tlen; i++) {
-            int sw_i = trace[tlen - 1 - i];
-            strcpy(pa->hops[i], topo->nodes[sw_indices[sw_i]].id);
+            int sw_i = all_paths[p_idx][i];
+            strcpy(p->hops[i], topo->nodes[sw_indices[sw_i]].id);
             if (i > 0) strcat(path_str, " -> ");
             strcat(path_str, topo->nodes[sw_indices[sw_i]].name);
 
-            // Mark intermediate switches as primary
+            // Mark intermediate switches
             if (i > 0 && i < tlen - 1) {
                 if (strcmp(topo->nodes[sw_indices[sw_i]].role, "ingress") != 0 &&
                     strcmp(topo->nodes[sw_indices[sw_i]].role, "egress") != 0) {
-                    strcpy(topo->nodes[sw_indices[sw_i]].role, "primary");
-                    strcpy(topo->nodes[sw_indices[sw_i]].subtext, "Primary");
+                    if (p_idx == 0) {
+                        strcpy(topo->nodes[sw_indices[sw_i]].role, "primary");
+                        strcpy(topo->nodes[sw_indices[sw_i]].subtext, "Primary");
+                    } else if (p_idx == 1 && strcmp(topo->nodes[sw_indices[sw_i]].role, "primary") != 0) {
+                        strcpy(topo->nodes[sw_indices[sw_i]].role, "backup");
+                        strcpy(topo->nodes[sw_indices[sw_i]].subtext, "Backup");
+                    }
                 }
             }
         }
-        snprintf(pa->name, sizeof(pa->name), "Path-A (%s)", path_str);
 
-        // Mark links along path_a
-        for (int i = 0; i < pa->hop_count - 1; i++) {
-            const char *u = pa->hops[i];
-            const char *v = pa->hops[i + 1];
+        char path_label[16];
+        if (p_idx < 26) {
+            snprintf(path_label, sizeof(path_label), "Path-%c", 'A' + p_idx);
+        } else {
+            snprintf(path_label, sizeof(path_label), "Path-%d", p_idx + 1);
+        }
+        snprintf(p->name, sizeof(p->name), "%s (%s)", path_label, path_str);
+
+        // Mark links along this path
+        for (int i = 0; i < p->hop_count - 1; i++) {
+            const char *u = p->hops[i];
+            const char *v = p->hops[i + 1];
             for (int e = 0; e < topo->link_count; e++) {
                 TopoLink *lk = &topo->links[e];
                 if ((strcmp(lk->src, u) == 0 && strcmp(lk->dst, v) == 0) ||
                     (strcmp(lk->src, v) == 0 && strcmp(lk->dst, u) == 0)) {
-                    strcpy(lk->path_segment, "path_a");
-                    lk->is_bottleneck = true;
-                    if (strcmp(u, ingress) == 0) strcpy(lk->label, "Path A");
-                    else strcpy(lk->label, "Path A (egress)");
-                }
-            }
-        }
-
-        // Try to find alternate Path B by removing one intermediate edge
-        if (tlen > 2) {
-            int rem_u = trace[tlen - 2];
-            int rem_v = trace[tlen - 3];
-            adj[rem_u][rem_v] = 0;
-            adj[rem_v][rem_u] = 0;
-
-            for (int i = 0; i < MAX_NODES; i++) { visited[i] = 0; parent[i] = -1; }
-            qhead = qtail = 0;
-            queue[qtail++] = start_sw;
-            visited[start_sw] = 1;
-
-            while (qhead < qtail) {
-                int c = queue[qhead++];
-                if (c == end_sw) break;
-                for (int next = 0; next < sw_count; next++) {
-                    if (adj[c][next] && !visited[next]) {
-                        visited[next] = 1;
-                        parent[next] = c;
-                        queue[qtail++] = next;
-                    }
-                }
-            }
-
-            if (visited[end_sw]) {
-                int btrace[MAX_HOPS];
-                int blen = 0;
-                int bcur = end_sw;
-                while (bcur != -1 && blen < MAX_HOPS) {
-                    btrace[blen++] = bcur;
-                    bcur = parent[bcur];
-                }
-
-                TopoPath *pb = &topo->paths[topo->path_count++];
-                strcpy(pb->id, "path_b");
-                strcpy(pb->role, "alternate");
-                pb->hop_count = blen;
-                pb->delay_ms = 15.0;
-                pb->capacity_mbps = 10.0;
-                pb->queue_limit = 100;
-                pb->s1_output_port = 3;
-
-                char bpath_str[MAX_STR] = {0};
-                for (int i = 0; i < blen; i++) {
-                    int sw_i = btrace[blen - 1 - i];
-                    strcpy(pb->hops[i], topo->nodes[sw_indices[sw_i]].id);
-                    if (i > 0) strcat(bpath_str, " -> ");
-                    strcat(bpath_str, topo->nodes[sw_indices[sw_i]].name);
-
-                    if (i > 0 && i < blen - 1) {
-                        if (strcmp(topo->nodes[sw_indices[sw_i]].role, "ingress") != 0 &&
-                            strcmp(topo->nodes[sw_indices[sw_i]].role, "egress") != 0 &&
-                            strcmp(topo->nodes[sw_indices[sw_i]].role, "primary") != 0) {
-                            strcpy(topo->nodes[sw_indices[sw_i]].role, "backup");
-                            strcpy(topo->nodes[sw_indices[sw_i]].subtext, "Backup");
-                        }
-                    }
-                }
-                snprintf(pb->name, sizeof(pb->name), "Path-B (%s)", bpath_str);
-
-                for (int i = 0; i < pb->hop_count - 1; i++) {
-                    const char *u = pb->hops[i];
-                    const char *v = pb->hops[i + 1];
-                    for (int e = 0; e < topo->link_count; e++) {
-                        TopoLink *lk = &topo->links[e];
-                        if ((strcmp(lk->src, u) == 0 && strcmp(lk->dst, v) == 0) ||
-                            (strcmp(lk->src, v) == 0 && strcmp(lk->dst, u) == 0)) {
-                            if (!lk->path_segment[0]) {
-                                strcpy(lk->path_segment, "path_b");
-                                lk->is_bottleneck = true;
-                                if (strcmp(u, ingress) == 0) strcpy(lk->label, "Path B");
-                                else strcpy(lk->label, "Path B (egress)");
-                            }
+                    if (!lk->path_segment[0]) {
+                        strcpy(lk->path_segment, p->id);
+                        lk->is_bottleneck = true;
+                        if (strcmp(u, ingress) == 0) {
+                            snprintf(lk->label, sizeof(lk->label), "Path %c", 'A' + p_idx);
+                        } else {
+                            snprintf(lk->label, sizeof(lk->label), "%s->%s", topo->nodes[sw_indices[all_paths[p_idx][i]]].name,
+                                     topo->nodes[sw_indices[all_paths[p_idx][i+1]]].name);
                         }
                     }
                 }

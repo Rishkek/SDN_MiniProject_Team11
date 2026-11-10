@@ -108,6 +108,7 @@ class AnimatedTopologyCanvas(QWidget):
         self.active_path = PATH_PRIMARY
         self.path_a_load = 0.0
         self.path_b_load = 0.0
+        self.path_loads: Dict[str, float] = {}
         self.is_congested = False
         self.queue_occupancy = 0.0
         self.queue_limit = 100
@@ -284,10 +285,13 @@ class AnimatedTopologyCanvas(QWidget):
         self.update()
 
     def update_state(self, active_path: str, load_a: float, load_b: float, congested: bool,
-                     q_occupancy: float, q_limit: int, main_active: bool, cross_active: bool):
+                     q_occupancy: float, q_limit: int, main_active: bool, cross_active: bool,
+                     path_loads: Optional[Dict[str, float]] = None):
         self.active_path = active_path
         self.path_a_load = load_a
         self.path_b_load = load_b
+        if path_loads:
+            self.path_loads = dict(path_loads)
         self.is_congested = congested
         self.queue_occupancy = min(100.0, max(0.0, q_occupancy))
         self.queue_limit = q_limit
@@ -300,7 +304,7 @@ class AnimatedTopologyCanvas(QWidget):
             return
 
         if self.flow_main_active and random.random() < 0.35:
-            p_type = 'main_b' if self.active_path == PATH_ALTERNATE else 'main_a'
+            p_type = f"main_{self.active_path}"
             self.packets.append(PacketDot(p_type, self._dot_color_main, speed=0.030))
 
         if self.flow_cross_active and random.random() < 0.40:
@@ -372,20 +376,20 @@ class AnimatedTopologyCanvas(QWidget):
                     continue
 
                 seg = link.get("path_segment", "")
-                if seg == "path_a":
-                    is_active = (self.active_path == PATH_PRIMARY)
-                    color = self._color_path_red if self.is_congested else (self._color_path_green if is_active else self._color_path_idle)
-                    thick = 5 if is_active or self.flow_cross_active else 2
-                    raw_label = link.get("label", "Path A")
-                    lbl = (f"Path A: {self.path_a_load:.1f}M " + ("[CONGESTED]" if self.is_congested else "")) if ("Path A" in raw_label and not raw_label.endswith("M")) else raw_label
-                    draw_link(p1, p2, color, thick, lbl, alert=self.is_congested)
-                elif seg == "path_b":
-                    is_active = (self.active_path == PATH_ALTERNATE)
-                    color = self._color_path_green if is_active else self._color_path_idle
-                    thick = 5 if is_active else 2
-                    raw_label = link.get("label", "Path B")
-                    lbl = (f"Path B: {self.path_b_load:.1f}M " + ("[REROUTED]" if is_active else "[IDLE]")) if ("Path B" in raw_label and not raw_label.endswith("M")) else raw_label
-                    draw_link(p1, p2, color, thick, lbl)
+                if seg:
+                    seg_lower = seg.lower()
+                    act_lower = self.active_path.lower()
+                    is_active = (act_lower == seg_lower or seg_lower in act_lower or 
+                                 (seg_lower == "path_a" and ("path-a" in act_lower or "primary" in act_lower)) or 
+                                 (seg_lower == "path_b" and ("path-b" in act_lower or "alternate" in act_lower)))
+                    load = self.path_loads.get(seg, self.path_a_load if seg == "path_a" else self.path_b_load)
+                    is_alert = (is_active and self.is_congested)
+                    color = self._color_path_red if is_alert else (self._color_path_green if is_active else self._color_path_idle)
+                    thick = 5 if is_active or (seg == "path_a" and self.flow_cross_active) else 2
+                    raw_label = link.get("label", seg.upper())
+                    status_tag = "[CONGESTED]" if is_alert else ("[ACTIVE]" if is_active else "[STANDBY]")
+                    lbl = f"{raw_label}: {load:.1f}M {status_tag}"
+                    draw_link(p1, p2, color, thick, lbl, alert=is_alert)
                 else:
                     pen_col = link.get("pen_color")
                     col = QColor(pen_col) if pen_col else self._color_path_idle
@@ -440,21 +444,25 @@ class AnimatedTopologyCanvas(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         for p in self.packets:
             painter.setBrush(QBrush(p.color))
-            path_key = 'path_a' if 'a' in p.path else 'path_b'
+            if p.path.startswith("cross"):
+                path_key = "path_a"
+            else:
+                path_key = self.active_path
+
             path_info = self.topo_def.get_path(path_key) if self.topo_def else None
-            if not path_info and self.topo_def:
-                path_info = self.topo_def.get_path('path_a')
+            if not path_info and self.topo_def and self.topo_def.paths:
+                path_info = next(iter(self.topo_def.paths.values()), None)
 
             hops = path_info.get("hops", []) if path_info else []
             if len(hops) >= 2:
                 n_segs = len(hops) - 1
                 seg_idx = min(int(p.progress * n_segs), n_segs - 1)
                 seg_prog = (p.progress * n_segs) - seg_idx
-                u_pos = node_positions.get(hops[seg_idx].lower())
-                v_pos = node_positions.get(hops[seg_idx + 1].lower())
+                u_pos = node_positions.get(str(hops[seg_idx]).lower())
+                v_pos = node_positions.get(str(hops[seg_idx + 1]).lower())
                 pt = get_pos_on_segment(u_pos, v_pos, seg_prog) if (u_pos and v_pos) else (w // 2, h // 2)
             elif len(hops) == 1:
-                sw_pos = node_positions.get(hops[0].lower(), (w // 2, h // 2))
+                sw_pos = node_positions.get(str(hops[0]).lower(), (w // 2, h // 2))
                 h1_pos = node_positions.get("h1", (int(w * 0.1), int(h * 0.3)))
                 h2_pos = node_positions.get("h2", (int(w * 0.9), int(h * 0.3)))
                 pt = get_pos_on_segment(h1_pos, sw_pos, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(sw_pos, h2_pos, (p.progress - 0.5) * 2.0)
@@ -2204,6 +2212,10 @@ class MasterSDNGUI(QMainWindow):
         self.tabs.addTab(c4, "⚡ Automated Benchmark & Performance Evaluation")
         self.popout_containers.append(c4)
 
+        # Initialize dynamic multi-path controls for initial topology
+        if hasattr(self, "topo_canvas") and self.topo_canvas and self.topo_canvas.topo_def:
+            self._rebuild_path_controls(self.topo_canvas.topo_def)
+
     def _create_view_topology_operations(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -2297,55 +2309,81 @@ class MasterSDNGUI(QMainWindow):
         layout = QVBoxLayout(grp)
         layout.setSpacing(6)
 
-        # Subsection 1: Cable Bottlenecks & Buffers
+        # Subsection 1: Dynamic Multi-Path Bottlenecks & Buffers
         sec_cables = QFrame()
         sec_cables.setStyleSheet("background-color: #181825; border: 1px solid #313244; border-radius: 6px; padding: 6px;")
-        grid_c = QGridLayout(sec_cables)
-        grid_c.setContentsMargins(6, 4, 6, 4)
-        grid_c.setSpacing(6)
+        v_paths = QVBoxLayout(sec_cables)
+        v_paths.setContentsMargins(6, 4, 6, 4)
+        v_paths.setSpacing(6)
 
-        lbl_cables_header = QLabel("🔗 CABLE BOTTLENECK CONTROLS")
-        lbl_cables_header.setStyleSheet("color: #89b4fa; font-weight: bold; font-size: 10px;")
-        grid_c.addWidget(lbl_cables_header, 0, 0, 1, 3)
+        # Header with badge and rediscover button
+        h_paths_head = QHBoxLayout()
+        lbl_paths_header = QLabel("🌐 DETECTED PATHS & BANDWIDTH")
+        lbl_paths_header.setStyleSheet("color: #89b4fa; font-weight: bold; font-size: 10px;")
+        h_paths_head.addWidget(lbl_paths_header, 1)
 
-        # Path A Cable Bottleneck (S1->S2->S4)
-        grid_c.addWidget(QLabel("Path-A Cable BW:"), 1, 0)
-        self.slider_bw_a = QSlider(Qt.Orientation.Horizontal)
-        self.slider_bw_a.setRange(1, 25)
-        self.slider_bw_a.setValue(10)
-        self.slider_bw_a.valueChanged.connect(self._on_cable_a_bw_changed)
-        grid_c.addWidget(self.slider_bw_a, 1, 1)
-        self.lbl_val_bw_a = QLabel("10.0 Mbps")
-        self.lbl_val_bw_a.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        grid_c.addWidget(self.lbl_val_bw_a, 1, 2)
+        self.lbl_paths_badge = QLabel("2 Unique Paths")
+        self.lbl_paths_badge.setStyleSheet("background-color: #313244; color: #a6e3a1; font-weight: bold; font-size: 9px; padding: 2px 6px; border-radius: 4px;")
+        h_paths_head.addWidget(self.lbl_paths_badge)
 
-        # Path B Cable Bottleneck (S1->S3->S4)
-        grid_c.addWidget(QLabel("Path-B Cable BW:"), 2, 0)
-        self.slider_bw_b = QSlider(Qt.Orientation.Horizontal)
-        self.slider_bw_b.setRange(1, 25)
-        self.slider_bw_b.setValue(10)
-        self.slider_bw_b.valueChanged.connect(self._on_cable_b_bw_changed)
-        grid_c.addWidget(self.slider_bw_b, 2, 1)
-        self.lbl_val_bw_b = QLabel("10.0 Mbps")
-        self.lbl_val_bw_b.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        grid_c.addWidget(self.lbl_val_bw_b, 2, 2)
+        btn_rediscover = QPushButton("🔍 Find Paths")
+        btn_rediscover.setToolTip("Run DFS algorithm to discover all simple loop-free paths")
+        btn_rediscover.setStyleSheet("background-color: #313244; color: #89b4fa; font-size: 9px; padding: 2px 6px; border-radius: 4px;")
+        btn_rediscover.clicked.connect(self._rediscover_paths)
+        h_paths_head.addWidget(btn_rediscover)
+        v_paths.addLayout(h_paths_head)
 
-        # Backward compatibility aliases
-        self.slider_bw = self.slider_bw_a
-        self.lbl_val_bw = self.lbl_val_bw_a
+        # Container for dynamic path cards
+        self.paths_container_widget = QWidget()
+        self.paths_container_layout = QVBoxLayout(self.paths_container_widget)
+        self.paths_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.paths_container_layout.setSpacing(4)
+        v_paths.addWidget(self.paths_container_widget)
 
-        # Cable Queue Limit Slider
-        grid_c.addWidget(QLabel("Queue Buffer Limit:"), 3, 0)
+        # Dynamic Auto-Reroute Strategy Selector
+        row_policy = QHBoxLayout()
+        row_policy.addWidget(QLabel("Reroute Policy:"), 0)
+        self.combo_reroute_policy = QComboBox()
+        self.combo_reroute_policy.addItems([
+            "Auto: Least Loaded (Best Bandwidth)",
+            "Auto: Shortest Hop (Lowest Latency)",
+            "Auto: Max Headroom (Cap - Load)"
+        ])
+        self.combo_reroute_policy.setStyleSheet("background-color: #313244; color: #cdd6f4; font-size: 10px; border-radius: 4px; padding: 2px 4px;")
+        self.combo_reroute_policy.currentIndexChanged.connect(self._on_reroute_policy_changed)
+        row_policy.addWidget(self.combo_reroute_policy, 1)
+        v_paths.addLayout(row_policy)
+
+        # Global Buffer Queue Limit Slider
+        row_queue = QHBoxLayout()
+        row_queue.addWidget(QLabel("Queue Buffer:"), 0)
         self.slider_queue = QSlider(Qt.Orientation.Horizontal)
         self.slider_queue.setRange(10, 200)
         self.slider_queue.setValue(100)
         self.slider_queue.valueChanged.connect(self._on_queue_changed)
-        grid_c.addWidget(self.slider_queue, 3, 1)
+        row_queue.addWidget(self.slider_queue, 1)
         self.lbl_val_queue = QLabel("100 pkts")
-        self.lbl_val_queue.setStyleSheet("font-weight: bold; color: #89b4fa;")
-        grid_c.addWidget(self.lbl_val_queue, 3, 2)
+        self.lbl_val_queue.setStyleSheet("font-weight: bold; color: #89b4fa; min-width: 55px;")
+        row_queue.addWidget(self.lbl_val_queue, 0)
+        v_paths.addLayout(row_queue)
 
         layout.addWidget(sec_cables)
+
+        # Legacy backward-compatibility handles
+        self.slider_bw_a = QSlider(Qt.Orientation.Horizontal)
+        self.slider_bw_a.setRange(1, 35)
+        self.slider_bw_a.setValue(10)
+        self.slider_bw_a.valueChanged.connect(self._on_cable_a_bw_changed)
+        self.lbl_val_bw_a = QLabel("10.0 Mbps")
+
+        self.slider_bw_b = QSlider(Qt.Orientation.Horizontal)
+        self.slider_bw_b.setRange(1, 35)
+        self.slider_bw_b.setValue(10)
+        self.slider_bw_b.valueChanged.connect(self._on_cable_b_bw_changed)
+        self.lbl_val_bw_b = QLabel("10.0 Mbps")
+
+        self.slider_bw = self.slider_bw_a
+        self.lbl_val_bw = self.lbl_val_bw_a
 
         # Subsection 2: Sender Transmission Rates
         sec_senders = QFrame()
@@ -2395,11 +2433,11 @@ class MasterSDNGUI(QMainWindow):
 
         # Reroute Overrides in proportional HBox
         row6 = QHBoxLayout()
-        btn_force_b = QPushButton("🔀 Force Path B")
-        btn_force_b.clicked.connect(lambda: self._manual_reroute(PATH_ALTERNATE))
+        btn_force_b = QPushButton("🔀 Route Next Best")
+        btn_force_b.clicked.connect(self._route_next_best_path)
         row6.addWidget(btn_force_b)
 
-        btn_force_a = QPushButton("⏮ Revert Path A")
+        btn_force_a = QPushButton("⏮ Revert Primary")
         btn_force_a.clicked.connect(lambda: self._manual_reroute(PATH_PRIMARY))
         row6.addWidget(btn_force_a)
         layout.addLayout(row6)
@@ -2535,19 +2573,142 @@ class MasterSDNGUI(QMainWindow):
     def _launch_external_terminal(self):
         self.console_widget._launch_external_terminal()
 
-    def _on_cable_a_bw_changed(self, val):
-        self.lbl_val_bw_a.setText(f"{val}.0 Mbps")
+    def _rebuild_path_controls(self, topo_def=None):
+        """Dynamically constructs real-time bandwidth & routing controls for each detected path."""
+        if not topo_def:
+            topo_def = getattr(self.topo_canvas, "topo_def", None)
+        if not topo_def or not hasattr(self, "paths_container_layout"):
+            return
+
+        # Clear existing dynamic widgets in paths layout
+        while self.paths_container_layout.count():
+            item = self.paths_container_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        self.path_cards.clear()
+        self.path_bw_sliders.clear()
+        self.path_bw_labels.clear()
+        self.path_status_pills.clear()
+
+        paths = topo_def.paths or {}
+        n_paths = len(paths)
+        if hasattr(self, "lbl_paths_badge"):
+            self.lbl_paths_badge.setText(f"{n_paths} Unique Paths Detected")
+
+        for idx, (p_id, p_info) in enumerate(paths.items()):
+            card = QFrame()
+            card.setStyleSheet("background-color: #11111b; border: 1px solid #313244; border-radius: 5px; padding: 4px; margin-bottom: 2px;")
+            c_layout = QVBoxLayout(card)
+            c_layout.setContentsMargins(6, 4, 6, 4)
+            c_layout.setSpacing(4)
+
+            # Row 1: Path name, status pill, route button
+            row_top = QHBoxLayout()
+            p_name = p_info.get("name", p_id.upper())
+            lbl_name = QLabel(p_name)
+            lbl_name.setStyleSheet("font-weight: bold; color: #cdd6f4; font-size: 10px;")
+            row_top.addWidget(lbl_name, 1)
+
+            pill = QLabel("STANDBY")
+            pill.setStyleSheet("background-color: #313244; color: #a6adc8; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")
+            row_top.addWidget(pill)
+            self.path_status_pills[p_id] = pill
+
+            btn_route = QPushButton("🔀 Route")
+            btn_route.setToolTip(f"Manually force traffic to {p_id}")
+            btn_route.setStyleSheet("background-color: #313244; color: #89b4fa; padding: 2px 6px; font-size: 9px; border-radius: 3px; font-weight: bold;")
+            btn_route.clicked.connect(lambda checked=False, target=p_id: self._manual_reroute(target))
+            row_top.addWidget(btn_route)
+            c_layout.addLayout(row_top)
+
+            # Row 2: Bandwidth Slider
+            row_bw = QHBoxLayout()
+            row_bw.addWidget(QLabel("BW:"), 0)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(1, 35)
+            cap_val = int(p_info.get("capacity_mbps", 10.0))
+            slider.setValue(cap_val)
+            slider.valueChanged.connect(lambda val, path=p_id: self._on_path_bw_changed(path, val))
+            row_bw.addWidget(slider, 1)
+
+            lbl_val = QLabel(f"{cap_val}.0 Mbps")
+            lbl_val.setStyleSheet("font-weight: bold; color: #89b4fa; min-width: 50px;")
+            row_bw.addWidget(lbl_val, 0)
+            c_layout.addLayout(row_bw)
+
+            self.path_bw_sliders[p_id] = slider
+            self.path_bw_labels[p_id] = lbl_val
+            self.path_cards[p_id] = card
+            self.paths_container_layout.addWidget(card)
+
+            # Keep legacy aliases in sync
+            if p_id == "path_a":
+                self.slider_bw_a = slider
+                self.lbl_val_bw_a = lbl_val
+            elif p_id == "path_b":
+                self.slider_bw_b = slider
+                self.lbl_val_bw_b = lbl_val
+
+        # Notify emulator & controller of updated paths
+        if hasattr(self, "emulator") and self.emulator:
+            self.emulator.apply_topology(topo_def)
+        if hasattr(self, "controller") and self.controller:
+            self.controller.set_available_paths(paths)
+
+    def _rediscover_paths(self):
+        """Runs the DFS graph traversal algorithm to find all unique simple paths and refreshes the panel."""
+        if hasattr(self, "topo_canvas") and self.topo_canvas and self.topo_canvas.topo_def:
+            topo = self.topo_canvas.topo_def
+            from src.topology_loader import discover_all_simple_paths
+            paths = discover_all_simple_paths(topo.switches, topo.hosts, topo.links)
+            if paths:
+                topo.paths = paths
+                self._rebuild_path_controls(topo)
+                self.statusBar().showMessage(f"Discovered {len(paths)} unique loop-free paths across topology!", 5000)
+
+    def _on_reroute_policy_changed(self, idx: int):
+        policies = ["least_loaded", "shortest_hop", "max_headroom"]
+        if 0 <= idx < len(policies):
+            chosen = policies[idx]
+            self.controller.reroute_policy = chosen
+            self.statusBar().showMessage(f"Auto-Reroute Policy set to: {chosen.replace('_', ' ').title()}", 4000)
+
+    def _route_next_best_path(self):
+        """Selects the best alternative path and manually triggers rerouting."""
+        curr = self.controller.current_active_path
+        paths = list(self.controller.paths.keys())
+        alternates = [p for p in paths if p != curr]
+        if not alternates:
+            return
+        best = min(alternates, key=lambda p: (self.controller.path_loads.get(p, 0.0), len(self.controller.paths[p].get("hops", []))))
+        self._manual_reroute(best)
+
+    def _on_path_bw_changed(self, path_id: str, val: int):
+        lbl = self.path_bw_labels.get(path_id)
+        if lbl:
+            lbl.setText(f"{val}.0 Mbps")
+        if path_id == "path_a" and hasattr(self, "lbl_val_bw_a"):
+            self.lbl_val_bw_a.setText(f"{val}.0 Mbps")
+        elif path_id == "path_b" and hasattr(self, "lbl_val_bw_b"):
+            self.lbl_val_bw_b.setText(f"{val}.0 Mbps")
+
         if hasattr(self, "topo_handler"):
-            self.topo_handler.set_cable_bottleneck("cable_path_a", float(val))
-        elif hasattr(self, "emulator"):
+            self.topo_handler.set_cable_bottleneck(f"cable_{path_id}", float(val))
+        if hasattr(self, "emulator") and hasattr(self.emulator, "path_links"):
+            if path_id in self.emulator.path_links:
+                self.emulator.path_links[path_id].set_capacity_mbps(float(val))
+        if path_id == "path_a" and hasattr(self, "emulator"):
             self.emulator.link_path_a.set_capacity_mbps(float(val))
+        elif path_id == "path_b" and hasattr(self, "emulator"):
+            self.emulator.link_path_b.set_capacity_mbps(float(val))
+
+    def _on_cable_a_bw_changed(self, val):
+        self._on_path_bw_changed("path_a", val)
 
     def _on_cable_b_bw_changed(self, val):
-        self.lbl_val_bw_b.setText(f"{val}.0 Mbps")
-        if hasattr(self, "topo_handler"):
-            self.topo_handler.set_cable_bottleneck("cable_path_b", float(val))
-        elif hasattr(self, "emulator"):
-            self.emulator.link_path_b.set_capacity_mbps(float(val))
+        self._on_path_bw_changed("path_b", val)
 
     def _on_bw_changed(self, val):
         self._on_cable_a_bw_changed(val)
@@ -2687,18 +2848,18 @@ class MasterSDNGUI(QMainWindow):
         self.lbl_val_counts.setText(f"Recv: {recv:,} | Lost: {lost:,} | Total: {total_pkts:,}")
 
         active_path = ctrl_status["active_path"]
-        both_congested = bool(ctrl_status.get("both_paths_congested"))
+        both_congested = bool(ctrl_status.get("all_paths_congested", ctrl_status.get("both_paths_congested")))
         status_key = f"{active_path}_{both_congested}"
         if status_key != self._last_active_path_status:
             self._last_active_path_status = status_key
             if both_congested:
-                self.lbl_active_path_status.setText("CRITICAL: BOTH PATHS CONGESTED")
+                self.lbl_active_path_status.setText("CRITICAL: ALL PATHS CONGESTED")
                 self.lbl_active_path_status.setStyleSheet("background: #f38ba8; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
             elif active_path == PATH_PRIMARY:
                 self.lbl_active_path_status.setText("ACTIVE PATH: Path-A (Primary)")
                 self.lbl_active_path_status.setStyleSheet("background: #a6e3a1; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
             else:
-                self.lbl_active_path_status.setText("ACTIVE PATH: Path-B (DYNAMICALLY REROUTED)")
+                self.lbl_active_path_status.setText(f"ACTIVE PATH: {active_path.upper()} (DYNAMICALLY REROUTED)")
                 self.lbl_active_path_status.setStyleSheet("background: #89b4fa; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
 
         rec_sec = ctrl_status.get("latest_recovery_time_sec")
@@ -2713,7 +2874,25 @@ class MasterSDNGUI(QMainWindow):
 
         load_a = ctrl_status.get("path_a_load_mbps", 0.0)
         load_b = ctrl_status.get("path_b_load_mbps", 0.0)
-        is_congested = (load_a >= self.controller.congestion_threshold_mbps)
+        path_loads = ctrl_status.get("path_loads", {})
+        active_norm = getattr(self.controller, "_normalize_path_id", lambda x: x)(active_path)
+        active_load = path_loads.get(active_norm, path_loads.get(active_path, load_a if active_norm == "path_a" else load_b))
+        is_congested = (active_load >= self.controller.congestion_threshold_mbps)
+
+        # Update dynamic path status pills
+        for p_id, pill in self.path_status_pills.items():
+            p_load = path_loads.get(p_id, load_a if p_id == "path_a" else load_b)
+            if p_id == active_norm or p_id == active_path:
+                is_p_cong = (p_load >= self.controller.congestion_threshold_mbps)
+                if is_p_cong:
+                    pill.setText(f"ACTIVE: {p_load:.1f}M [CONG]")
+                    pill.setStyleSheet("background-color: #f38ba8; color: #11111b; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")
+                else:
+                    pill.setText(f"ACTIVE: {p_load:.1f}M")
+                    pill.setStyleSheet("background-color: #a6e3a1; color: #11111b; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")
+            else:
+                pill.setText(f"STANDBY: {p_load:.1f}M")
+                pill.setStyleSheet("background-color: #313244; color: #a6adc8; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")
 
         q_cur = self.emulator.link_path_a.packet_queue.qsize()
         q_max = self.emulator.link_path_a.max_queue
@@ -2722,7 +2901,8 @@ class MasterSDNGUI(QMainWindow):
         is_main_active = bool(self.main_sender and self.main_sender._running)
         self.topo_canvas.update_state(
             active_path, load_a, load_b, is_congested,
-            q_pct, q_max, is_main_active, self.is_cross_burst_active
+            q_pct, q_max, is_main_active, self.is_cross_burst_active,
+            path_loads=path_loads
         )
 
         elapsed = time.time() - self.start_epoch
@@ -2756,6 +2936,9 @@ class MasterSDNGUI(QMainWindow):
                 self.controller.congestion_threshold_mbps = float(
                     policy.get("congestion_threshold_mbps", self.controller.congestion_threshold_mbps)
                 )
+
+        # Dynamically build control rows for all detected paths
+        self._rebuild_path_controls(topo)
 
         # Sync GUI sliders with loaded topology
         cable_a = self.topo_handler.get_cable("cable_path_a") if hasattr(self, "topo_handler") else None

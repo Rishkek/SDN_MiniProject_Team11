@@ -143,41 +143,52 @@ class TopologyHandler:
         self.cables.clear()
         self.senders.clear()
 
-        # Build cable elements from links and paths
-        path_a_info = topo_def.get_path("path_a") or {}
-        path_b_info = topo_def.get_path("path_b") or {}
+        # Build cable elements for all detected paths dynamically
+        paths_data = topo_def.paths or {}
+        for p_id, p_info in paths_data.items():
+            cable_id = f"cable_{p_id}"
+            cap = float(p_info.get("capacity_mbps", 10.0))
+            delay = float(p_info.get("delay_ms", 5.0))
+            q_lim = int(p_info.get("queue_limit", 100))
+            c_name = p_info.get("name", f"Cable {p_id.upper()}")
+            hops = p_info.get("hops", ["s1", "s4"])
+            self.cables[cable_id] = CableElement(
+                cable_id=cable_id,
+                name=c_name,
+                cable_type="primary_bottleneck" if p_id == "path_a" else "alternate_bottleneck",
+                src=hops[0] if hops else "s1",
+                dst=hops[-1] if hops else "s4",
+                capacity_mbps=cap,
+                delay_ms=delay,
+                queue_limit=q_lim,
+                path_segment=p_id
+            )
 
-        # 1. Primary bottleneck cable (Path A)
-        cap_a = float(path_a_info.get("capacity_mbps", 10.0))
-        del_a = float(path_a_info.get("delay_ms", 5.0))
-        q_a = int(path_a_info.get("queue_limit", 100))
-        self.cables["cable_path_a"] = CableElement(
-            cable_id="cable_path_a",
-            name="Path-A Cable (S1->S2->S4)",
-            cable_type="primary_bottleneck",
-            src="s1",
-            dst="s4",
-            capacity_mbps=cap_a,
-            delay_ms=del_a,
-            queue_limit=q_a,
-            path_segment="path_a"
-        )
-
-        # 2. Alternate bottleneck cable (Path B)
-        cap_b = float(path_b_info.get("capacity_mbps", 10.0))
-        del_b = float(path_b_info.get("delay_ms", 15.0))
-        q_b = int(path_b_info.get("queue_limit", 100))
-        self.cables["cable_path_b"] = CableElement(
-            cable_id="cable_path_b",
-            name="Path-B Cable (S1->S3->S4)",
-            cable_type="alternate_bottleneck",
-            src="s1",
-            dst="s4",
-            capacity_mbps=cap_b,
-            delay_ms=del_b,
-            queue_limit=q_b,
-            path_segment="path_b"
-        )
+        # Ensure standard baseline aliases cable_path_a and cable_path_b always exist
+        if "cable_path_a" not in self.cables:
+            self.cables["cable_path_a"] = CableElement(
+                cable_id="cable_path_a",
+                name="Path-A Cable (Primary)",
+                cable_type="primary_bottleneck",
+                src="s1",
+                dst="s4",
+                capacity_mbps=10.0,
+                delay_ms=5.0,
+                queue_limit=100,
+                path_segment="path_a"
+            )
+        if "cable_path_b" not in self.cables:
+            self.cables["cable_path_b"] = CableElement(
+                cable_id="cable_path_b",
+                name="Path-B Cable (Alternate)",
+                cable_type="alternate_bottleneck",
+                src="s1",
+                dst="s4",
+                capacity_mbps=10.0,
+                delay_ms=15.0,
+                queue_limit=100,
+                path_segment="path_b"
+            )
 
         # 3. Host Edge Cables
         for lk in topo_def.links:
@@ -255,6 +266,8 @@ class TopologyHandler:
 
         # Apply to emulator
         if self.emulator:
+            if hasattr(self.emulator, "path_links") and cable.path_segment in self.emulator.path_links:
+                self.emulator.path_links[cable.path_segment].set_capacity_mbps(capacity_mbps)
             if cable.cable_id == "cable_path_a" or cable.path_segment == "path_a":
                 self.emulator.link_path_a.set_capacity_mbps(capacity_mbps)
             elif cable.cable_id == "cable_path_b" or cable.path_segment == "path_b":
@@ -351,7 +364,11 @@ class TopologyHandler:
         logger.info(f"[TopologyHandler] Sender '{sender.name}' sending rate set to {rate_mbps:.1f} Mbps.")
 
     def on_reroute(self, active_path: str):
-        """Reacts to SDN rerouting decisions by marking cable active/inactive states."""
+        """Reacts to SDN rerouting decisions by marking cable active/inactive states across all paths."""
+        for c_id, c in self.cables.items():
+            if c.path_segment:
+                c.is_active = (c.path_segment.lower() == active_path.lower())
+
         is_path_a = (active_path.lower() in ("path_a", "a", "primary"))
         if "cable_path_a" in self.cables:
             self.cables["cable_path_a"].is_active = is_path_a

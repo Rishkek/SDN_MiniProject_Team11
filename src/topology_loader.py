@@ -28,6 +28,117 @@ class CorruptTopologyFileError(ValueError):
     pass
 
 
+def discover_all_simple_paths(
+    switches: List[Dict[str, Any]],
+    hosts: List[Dict[str, Any]],
+    links: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Discovers all unique loop-free simple paths between Ingress and Egress switches
+    using Depth-First Search (DFS) graph traversal.
+    """
+    if not switches:
+        return {}
+
+    sw_ids = {str(s.get("id", "")).lower(): s for s in switches if s.get("id")}
+    if not sw_ids:
+        return {}
+
+    ingress_id = None
+    egress_id = None
+
+    for s in switches:
+        role = str(s.get("role", "")).lower()
+        if role == "ingress" and not ingress_id:
+            ingress_id = str(s.get("id", "")).lower()
+        elif role == "egress":
+            egress_id = str(s.get("id", "")).lower()
+
+    # Fallback to connected hosts
+    if not ingress_id or not egress_id:
+        for lk in links:
+            src = str(lk.get("src", "")).lower()
+            dst = str(lk.get("dst", "")).lower()
+            if src in ("h1", "sender") and dst in sw_ids and not ingress_id:
+                ingress_id = dst
+            if dst in ("h2", "receiver", "reciever") and src in sw_ids and not egress_id:
+                egress_id = src
+
+    if not ingress_id:
+        ingress_id = list(sw_ids.keys())[0]
+    if not egress_id:
+        egress_id = list(sw_ids.keys())[-1]
+
+    if ingress_id == egress_id or len(sw_ids) == 1:
+        sw_name = sw_ids[ingress_id].get("name", ingress_id.upper())
+        return {
+            "path_a": {
+                "id": "path_a",
+                "name": f"Direct ({sw_name})",
+                "role": "primary",
+                "hops": [ingress_id],
+                "delay_ms": 1.0,
+                "capacity_mbps": 100.0,
+                "queue_limit": 1000,
+                "s1_output_port": 1
+            }
+        }
+
+    # Adjacency list
+    adj: Dict[str, List[str]] = {s_id: [] for s_id in sw_ids}
+    for lk in links:
+        u = str(lk.get("src", "")).lower()
+        v = str(lk.get("dst", "")).lower()
+        if u in sw_ids and v in sw_ids and u != v:
+            if v not in adj[u]:
+                adj[u].append(v)
+            if u not in adj[v]:
+                adj[v].append(u)
+
+    # DFS backtracking
+    all_paths: List[List[str]] = []
+    visited = set([ingress_id])
+
+    def dfs(curr: str, target: str, path: List[str]):
+        if curr == target:
+            if len(path) >= 2:
+                all_paths.append(list(path))
+            return
+        for nxt in adj.get(curr, []):
+            if nxt not in visited:
+                visited.add(nxt)
+                path.append(nxt)
+                dfs(nxt, target, path)
+                path.pop()
+                visited.remove(nxt)
+
+    dfs(ingress_id, egress_id, [ingress_id])
+
+    # Sort shortest hops first
+    all_paths.sort(key=len)
+
+    paths_dict: Dict[str, Any] = {}
+    for idx, hops in enumerate(all_paths):
+        p_id = f"path_{chr(ord('a') + idx)}" if idx < 26 else f"path_{idx + 1}"
+        p_label = f"Path-{chr(ord('A') + idx)}" if idx < 26 else f"Path-{idx + 1}"
+        role = "primary" if idx == 0 else ("alternate" if idx == 1 else "backup")
+        hop_names = [sw_ids[h].get("name", h.upper()) for h in hops if h in sw_ids]
+        path_name = f"{p_label} ({' -> '.join(hop_names)})"
+        delay = 5.0 * max(1, len(hops) - 1)
+        paths_dict[p_id] = {
+            "id": p_id,
+            "name": path_name,
+            "role": role,
+            "hops": hops,
+            "delay_ms": delay,
+            "capacity_mbps": 10.0,
+            "queue_limit": 100,
+            "s1_output_port": idx + 2
+        }
+
+    return paths_dict
+
+
 class TopologyDefinition:
     """
     Structured representation of a parsed .json network topology.
@@ -49,6 +160,25 @@ class TopologyDefinition:
         self.paths: Dict[str, Any] = data.get("paths", {})
         self.traffic_profile: Dict[str, Any] = data.get("traffic_profile", {})
         self.sdn_policy: Dict[str, Any] = data.get("sdn_policy", {})
+
+        # Dynamic path discovery if paths are missing or incomplete
+        if not self.paths or len(self.paths) < 2:
+            discovered = discover_all_simple_paths(self.switches, self.hosts, self.links)
+            if len(discovered) > len(self.paths):
+                self.paths = discovered
+
+        # Tag links with path segments if missing
+        for p_id, p_info in self.paths.items():
+            hops = p_info.get("hops", [])
+            for i in range(len(hops) - 1):
+                u, v = hops[i].lower(), hops[i + 1].lower()
+                for lk in self.links:
+                    l_src = lk.get("src", "").lower()
+                    l_dst = lk.get("dst", "").lower()
+                    if (l_src == u and l_dst == v) or (l_src == v and l_dst == u):
+                        if not lk.get("path_segment"):
+                            lk["path_segment"] = p_id
+                            lk["is_bottleneck"] = True
 
         # Fast lookup maps
         self._node_map: Dict[str, Dict[str, Any]] = {}
@@ -73,9 +203,18 @@ class TopologyDefinition:
         return default
 
     def get_path(self, path_key: str, default: Any = None) -> Any:
-        """Retrieves path specification by key ('path_a', 'path_b')."""
-        val = self.paths.get(path_key)
-        return val if val is not None else default
+        """Retrieves path specification by key ('path_a', 'path_b') or name."""
+        if not path_key:
+            return default
+        if path_key in self.paths:
+            return self.paths[path_key]
+        p_lower = str(path_key).lower()
+        if p_lower in self.paths:
+            return self.paths[p_lower]
+        for pid, pdata in self.paths.items():
+            if str(pdata.get("name", "")).lower() == p_lower or pid in p_lower:
+                return pdata
+        return default
 
     def to_dict(self) -> Dict[str, Any]:
         """Exports definition back to serializable dictionary."""
