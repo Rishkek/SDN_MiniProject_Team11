@@ -112,11 +112,11 @@ def test_c_baseline_routing():
     time.sleep(1.4)
 
     sender.stop()
-    recv.stop()
-    emulator.stop()
-    ctrl.stop()
-
+    time.sleep(0.15)
     stats = recv.get_latest_stats()
+    emulator.stop()
+    recv.stop()
+    ctrl.stop()
     status = ctrl.get_controller_status()
 
     assert status["active_path"] == PATH_PRIMARY, "Should remain on Path A"

@@ -59,12 +59,14 @@ class SDNController:
         congestion_threshold_mbps: float = CONGESTION_THRESHOLD_MBPS,
         poll_interval: float = POLL_INTERVAL_SEC,
         adaptive_routing_enabled: bool = True,
-        auto_revert_enabled: bool = True
+        auto_revert_enabled: bool = True,
+        triggers_required: int = CONSECUTIVE_TRIGGERS_REQUIRED
     ):
         self.congestion_threshold_mbps = congestion_threshold_mbps
         self.poll_interval = poll_interval
         self.adaptive_routing_enabled = adaptive_routing_enabled
         self.auto_revert_enabled = auto_revert_enabled
+        self.triggers_required = max(1, int(triggers_required))
 
         self._running = False
         self._monitor_thread: Optional[threading.Thread] = None
@@ -231,14 +233,15 @@ class SDNController:
                 active_load = self.path_loads.get(active_path, 0.0)
 
             # Congestion evaluation on the current active path
+            req_triggers = getattr(self, "triggers_required", CONSECUTIVE_TRIGGERS_REQUIRED)
             if active_load >= self.congestion_threshold_mbps:
                 self.consecutive_breaches += 1
                 logger.warning(
                     f"[CONGESTION WARNING] {active_path} Load: {active_load:.2f} Mbps >= "
-                    f"Threshold ({self.congestion_threshold_mbps:.2f} Mbps) [Breach {self.consecutive_breaches}/{CONSECUTIVE_TRIGGERS_REQUIRED}]"
+                    f"Threshold ({self.congestion_threshold_mbps:.2f} Mbps) [Breach {self.consecutive_breaches}/{req_triggers}]"
                 )
 
-                if self.consecutive_breaches >= CONSECUTIVE_TRIGGERS_REQUIRED:
+                if self.consecutive_breaches >= req_triggers:
                     # Discover all viable alternative paths (exclude current active path and its aliases)
                     candidate_paths = [
                         p for p in self.paths
@@ -439,11 +442,15 @@ class SDNController:
     def get_controller_status(self) -> Dict[str, Any]:
         """Provides status summary for GUI, CLI, or benchmark evaluators."""
         with self._lock:
+            req = getattr(self, "triggers_required", CONSECUTIVE_TRIGGERS_REQUIRED)
             return {
                 "active_path": self.current_active_path,
                 "adaptive_enabled": self.adaptive_routing_enabled,
                 "both_paths_congested": self.both_paths_congested,
                 "all_paths_congested": getattr(self, "all_paths_congested", self.both_paths_congested),
+                "consecutive_breaches": self.consecutive_breaches,
+                "triggers_required": req,
+                "is_evaluating": (0 < self.consecutive_breaches < req),
                 "path_a_load_mbps": round(self.latest_path_a_load_mbps, 2),
                 "path_b_load_mbps": round(self.latest_path_b_load_mbps, 2),
                 "path_loads": {p: round(ld, 2) for p, ld in self.path_loads.items()},

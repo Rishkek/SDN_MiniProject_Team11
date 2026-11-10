@@ -181,6 +181,10 @@ class UDPReceiver:
                         self.expected_seq = seq_num + 1
                     elif seq_num < self.expected_seq:
                         self.out_of_order_packets += 1
+                        if self.total_packets_lost > 0:
+                            self.total_packets_lost -= 1
+                        if self._window_lost > 0:
+                            self._window_lost -= 1
                     else:
                         self.expected_seq += 1
 

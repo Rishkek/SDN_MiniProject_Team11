@@ -50,10 +50,10 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QSlider, QTabWidget, QGroupBox, QGridLayout,
     QProgressBar, QFrame, QMessageBox, QComboBox, QTextEdit, QPlainTextEdit,
     QSplitter, QScrollArea, QSizePolicy, QToolBar, QMenuBar, QMenu,
-    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog
+    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QToolTip
 )
 from PyQt6.QtCore import Qt, QTimer, QPointF, pyqtSignal, QThread
-from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QAction, QTextCursor
+from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QAction, QTextCursor, QMouseEvent
 
 import matplotlib
 matplotlib.use("QtAgg")
@@ -113,21 +113,24 @@ class AnimatedTopologyCanvas(QWidget):
         self.setMinimumHeight(240)
         self.setMinimumWidth(360)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMouseTracking(True)
 
         self.active_path = PATH_PRIMARY
         self.path_a_load = 0.0
         self.path_b_load = 0.0
         self.path_loads: Dict[str, float] = {}
         self.is_congested = False
+        self.is_evaluating = False
+        self.consecutive_breaches = 0
+        self.triggers_required = 3
         self.queue_occupancy = 0.0
         self.queue_limit = 100
         self.flow_main_active = False
         self.flow_cross_active = False
 
+        self._rendered_wires = []
+        self._hovered_wire = None
         self.packets: List[PacketDot] = []
-        self.anim_timer = QTimer(self)
-        self.anim_timer.timeout.connect(self._step_animation)
-        self.anim_timer.start(33)  # Smooth 30 FPS rendering with low CPU overhead
 
         self._font_regular_7 = QFont("Segoe UI", 7)
         self._font_bold_7 = QFont("Segoe UI", 7, QFont.Weight.Bold)
@@ -290,42 +293,117 @@ class AnimatedTopologyCanvas(QWidget):
     def set_topology(self, topo):
         """Applies a newly loaded TopologyDefinition and refreshes canvas."""
         self.topo_def = topo
-        self.packets.clear()
+        self._rendered_wires.clear()
+        self._hovered_wire = None
         self.update()
 
     def update_state(self, active_path: str, load_a: float, load_b: float, congested: bool,
                      q_occupancy: float, q_limit: int, main_active: bool, cross_active: bool,
-                     path_loads: Optional[Dict[str, float]] = None):
+                     path_loads: Optional[Dict[str, float]] = None,
+                     is_evaluating: bool = False, consecutive_breaches: int = 0, triggers_required: int = 3):
         self.active_path = active_path
         self.path_a_load = load_a
         self.path_b_load = load_b
         if path_loads:
             self.path_loads = dict(path_loads)
         self.is_congested = congested
+        self.is_evaluating = is_evaluating
+        self.consecutive_breaches = consecutive_breaches
+        self.triggers_required = triggers_required
         self.queue_occupancy = min(100.0, max(0.0, q_occupancy))
         self.queue_limit = q_limit
         self.flow_main_active = main_active
         self.flow_cross_active = cross_active
+        self.update()
 
     def _step_animation(self):
-        # If no active traffic and no packets remaining, avoid unnecessary repaints
-        if not self.flow_main_active and not self.flow_cross_active and not self.packets:
-            return
+        pass
 
-        if self.flow_main_active and random.random() < 0.35:
-            p_type = f"main_{self.active_path}"
-            self.packets.append(PacketDot(p_type, self._dot_color_main, speed=0.030))
+    @staticmethod
+    def _dist_to_segment(pt, p1, p2):
+        """Calculates exact Euclidean distance from point pt to line segment (p1, p2)."""
+        px, py = pt
+        x1, y1 = p1
+        x2, y2 = p2
+        dx = x2 - x1
+        dy = y2 - y1
+        l2 = dx * dx + dy * dy
+        if l2 == 0:
+            return math.hypot(px - x1, py - y1)
+        t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / l2))
+        proj_x = x1 + t * dx
+        proj_y = y1 + t * dy
+        return math.hypot(px - proj_x, py - proj_y)
 
-        if self.flow_cross_active and random.random() < 0.40:
-            self.packets.append(PacketDot('cross_a', self._dot_color_cross, speed=0.030))
+    def mouseMoveEvent(self, event: QMouseEvent):
+        pos = event.position().toPoint()
+        mx, my = pos.x(), pos.y()
+        closest_wire = None
+        min_dist = float("inf")
 
-        surviving = []
-        for p in self.packets:
-            p.progress += p.speed
-            if p.progress < 1.0:
-                surviving.append(p)
-        self.packets = surviving
+        for w_info in getattr(self, "_rendered_wires", []):
+            d = self._dist_to_segment((mx, my), w_info["p1"], w_info["p2"])
+            if d < min_dist and d <= 15.0:
+                min_dist = d
+                closest_wire = w_info
+
+        if closest_wire:
+            prev = self._hovered_wire
+            self._hovered_wire = closest_wire
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            if prev != closest_wire:
+                self.update()
+
+            # Format rich instant flow rate popup
+            is_cong = closest_wire.get("is_alert", False)
+            is_eval = closest_wire.get("is_evaluating", False)
+            is_act = closest_wire.get("is_active", False)
+
+            if is_cong:
+                status_html = "<span style='color:#f38ba8; font-weight:bold;'>🚨 CONGESTED (SATURATED)</span>"
+            elif is_eval:
+                b_cur = closest_wire.get("breach", 1)
+                b_req = getattr(self, "triggers_required", 3)
+                status_html = f"<span style='color:#fab387; font-weight:bold;'>⚠️ CONGESTION DETECTED ({b_cur}/{b_req})</span>"
+            elif is_act:
+                status_html = "<span style='color:#a6e3a1; font-weight:bold;'>🟢 ACTIVE OPENFLOW ROUTE</span>"
+            else:
+                status_html = "<span style='color:#a6adc8; font-weight:bold;'>⚪ STANDBY BACKUP</span>"
+
+            flow_rate = float(closest_wire.get("load", 0.0))
+            cap = float(closest_wire.get("capacity", 10.0))
+            util = min(100.0, (flow_rate / max(0.1, cap)) * 100.0)
+            seg_title = closest_wire.get("segment", "link").upper()
+            src_name = str(closest_wire.get("src", "")).upper()
+            dst_name = str(closest_wire.get("dst", "")).upper()
+
+            tooltip_html = (
+                f"<div style='background-color:#181825; color:#cdd6f4; border:1px solid #45475a; "
+                f"padding:8px; border-radius:6px; font-family: Segoe UI, sans-serif; font-size:11px;'>"
+                f"<b style='color:#89b4fa; font-size:12px;'>Wire: {src_name} ➔ {dst_name}</b>"
+                f"<span style='color:#a6adc8; font-size:10px;'> ({seg_title})</span>"
+                f"<hr style='border:0; border-top:1px solid #313244; margin:4px 0;'/>"
+                f"<b>Status:</b> {status_html}<br/>"
+                f"<b>Current Flow Rate:</b> <span style='color:#fab387; font-weight:bold; font-size:13px;'>{flow_rate:.2f} Mbps</span><br/>"
+                f"<b>Cable Capacity:</b> {cap:.1f} Mbps (<b>Utilization:</b> {util:.1f}%)<br/>"
+                f"<b>Buffer Queue:</b> {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts"
+                f"</div>"
+            )
+            QToolTip.showText(event.globalPosition().toPoint(), tooltip_html, self)
+        else:
+            if self._hovered_wire is not None:
+                self._hovered_wire = None
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                QToolTip.hideText()
+                self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered_wire = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        QToolTip.hideText()
         self.update()
+        super().leaveEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -361,22 +439,55 @@ class AnimatedTopologyCanvas(QWidget):
                 "h4": (int(w * 0.92), int(h * 0.72)),
             }
 
-        def draw_link(p1, p2, pen_or_color, thickness=3, label=None, alert=False):
+        self._rendered_wires.clear()
+
+        def draw_link(p1, p2, pen_or_color, thickness=3, label=None, alert=False, evaluating=False, wire_meta=None):
+            is_hovered = False
+            if wire_meta and self._hovered_wire:
+                is_hovered = (self._hovered_wire.get("wire_id") == wire_meta.get("wire_id"))
+
+            # 1. Outer luminous glow if hovered, congested, or active
+            if is_hovered:
+                glow_pen = QPen(QColor(137, 180, 250, 180), thickness + 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                painter.setPen(glow_pen)
+                painter.drawLine(p1[0], p1[1], p2[0], p2[1])
+            elif alert:
+                glow_pen = QPen(QColor(243, 139, 168, 70), thickness + 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                painter.setPen(glow_pen)
+                painter.drawLine(p1[0], p1[1], p2[0], p2[1])
+            elif evaluating:
+                glow_pen = QPen(QColor(250, 179, 135, 80), thickness + 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                painter.setPen(glow_pen)
+                painter.drawLine(p1[0], p1[1], p2[0], p2[1])
+            elif thickness >= 4:
+                glow_pen = QPen(QColor(166, 227, 161, 50), thickness + 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                painter.setPen(glow_pen)
+                painter.drawLine(p1[0], p1[1], p2[0], p2[1])
+
+            # 2. Main core wire line
             if isinstance(pen_or_color, QPen):
                 painter.setPen(pen_or_color)
             else:
-                painter.setPen(QPen(pen_or_color, thickness))
+                painter.setPen(QPen(pen_or_color, thickness, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawLine(p1[0], p1[1], p2[0], p2[1])
+
+            # 3. Label on link midpoint
             if label:
                 mid_x = (p1[0] + p2[0]) // 2
                 mid_y = (p1[1] + p2[1]) // 2
-                painter.setPen(self._color_text_alert if alert else self._color_text_normal)
+                lbl_color = self._color_text_alert if alert else (QColor("#fab387") if evaluating else self._color_text_normal)
+                painter.setPen(lbl_color)
                 painter.setFont(self._font_bold_8)
-                painter.drawText(mid_x - 45, mid_y - 8, label)
+                painter.drawText(mid_x - 50, mid_y - 8, label)
+
+            if wire_meta:
+                wire_meta["p1"] = p1
+                wire_meta["p2"] = p2
+                self._rendered_wires.append(wire_meta)
 
         # Dynamic link rendering based on active TopologyDefinition
         if self.topo_def and self.topo_def.links:
-            for link in self.topo_def.links:
+            for idx, link in enumerate(self.topo_def.links):
                 src = str(link.get("src", "")).lower()
                 dst = str(link.get("dst", "")).lower()
                 p1 = node_positions.get(src)
@@ -385,6 +496,9 @@ class AnimatedTopologyCanvas(QWidget):
                     continue
 
                 seg = link.get("path_segment", "")
+                wire_id = f"{src}_{dst}_{idx}"
+                cap = float(link.get("capacity_mbps", 10.0))
+
                 if seg:
                     act_lower = self.active_path.lower()
                     seg_lower = seg.lower()
@@ -393,16 +507,58 @@ class AnimatedTopologyCanvas(QWidget):
                                  (seg_lower == "path_b" and ("path-b" in act_lower or "alternate" in act_lower)))
                     load = self.path_loads.get(seg, self.path_a_load if seg == "path_a" else self.path_b_load)
                     is_alert = (is_active and self.is_congested)
-                    color = self._color_path_red if is_alert else (self._color_path_green if is_active else self._color_path_idle)
-                    thick = 5 if is_active or (seg == "path_a" and self.flow_cross_active) else 2
+                    is_eval = (is_active and getattr(self, "is_evaluating", False))
+
+                    if is_alert:
+                        color = self._color_path_red
+                        thick = 6
+                        status_tag = "[🚨 CONGESTED]"
+                    elif is_eval:
+                        color = QColor("#fab387")
+                        thick = 5
+                        b_cur = getattr(self, "consecutive_breaches", 1)
+                        b_req = getattr(self, "triggers_required", 3)
+                        status_tag = f"[⚠️ EVALUATING: {b_cur}/{b_req}]"
+                    elif is_active:
+                        color = self._color_path_green
+                        thick = 5
+                        status_tag = "[ACTIVE]"
+                    else:
+                        color = self._color_path_idle
+                        thick = 3 if (seg == "path_a" and self.flow_cross_active) else 2
+                        status_tag = "[STANDBY]"
+
                     raw_label = link.get("label", seg.upper())
-                    status_tag = "[CONGESTED]" if is_alert else ("[ACTIVE]" if is_active else "[STANDBY]")
                     lbl = f"{raw_label}: {load:.1f}M {status_tag}"
-                    draw_link(p1, p2, color, thick, lbl, alert=is_alert)
+                    w_meta = {
+                        "wire_id": wire_id,
+                        "src": src,
+                        "dst": dst,
+                        "segment": seg,
+                        "load": load,
+                        "capacity": cap,
+                        "is_active": is_active,
+                        "is_alert": is_alert,
+                        "is_evaluating": is_eval,
+                        "breach": getattr(self, "consecutive_breaches", 1)
+                    }
+                    draw_link(p1, p2, color, thick, lbl, alert=is_alert, evaluating=is_eval, wire_meta=w_meta)
                 else:
                     pen_col = link.get("pen_color")
                     col = QColor(pen_col) if pen_col else self._color_path_idle
-                    draw_link(p1, p2, col, 2, link.get("label", ""))
+                    lbl = link.get("label", "")
+                    w_meta = {
+                        "wire_id": wire_id,
+                        "src": src,
+                        "dst": dst,
+                        "segment": "",
+                        "load": self.path_a_load if ("h1" in src or "h1" in dst) else 0.0,
+                        "capacity": cap,
+                        "is_active": False,
+                        "is_alert": False,
+                        "is_evaluating": False
+                    }
+                    draw_link(p1, p2, col, 2, lbl, wire_meta=w_meta)
         else:
             # Baseline diamond link rendering
             pos_h1 = node_positions.get("h1", (0, 0))
@@ -414,24 +570,28 @@ class AnimatedTopologyCanvas(QWidget):
             pos_h2 = node_positions.get("h2", (0, 0))
             pos_h4 = node_positions.get("h4", (0, 0))
 
-            draw_link(pos_h1, pos_s1, self._pen_link_h1, 2, "H1->S1")
-            draw_link(pos_h3, pos_s1, self._pen_link_h3, 2, "H3->S1")
-            draw_link(pos_s4, pos_h2, self._pen_link_h2, 2, "S4->H2")
-            draw_link(pos_s4, pos_h4, self._pen_link_h4, 2, "S4->H4")
+            draw_link(pos_h1, pos_s1, self._pen_link_h1, 2, "H1->S1", wire_meta={"wire_id": "h1_s1", "src": "h1", "dst": "s1", "segment": "", "load": self.path_a_load, "capacity": 10.0, "is_active": True, "is_alert": False, "is_evaluating": False})
+            draw_link(pos_h3, pos_s1, self._pen_link_h3, 2, "H3->S1", wire_meta={"wire_id": "h3_s1", "src": "h3", "dst": "s1", "segment": "", "load": 0.0, "capacity": 10.0, "is_active": False, "is_alert": False, "is_evaluating": False})
+            draw_link(pos_s4, pos_h2, self._pen_link_h2, 2, "S4->H2", wire_meta={"wire_id": "s4_h2", "src": "s4", "dst": "h2", "segment": "", "load": self.path_a_load, "capacity": 10.0, "is_active": True, "is_alert": False, "is_evaluating": False})
+            draw_link(pos_s4, pos_h4, self._pen_link_h4, 2, "S4->H4", wire_meta={"wire_id": "s4_h4", "src": "s4", "dst": "h4", "segment": "", "load": 0.0, "capacity": 10.0, "is_active": False, "is_alert": False, "is_evaluating": False})
 
             is_path_a_active = (self.active_path == PATH_PRIMARY)
-            color_a = self._color_path_red if self.is_congested else (self._color_path_green if is_path_a_active else self._color_path_idle)
+            is_eval = (is_path_a_active and getattr(self, "is_evaluating", False))
+            color_a = self._color_path_red if self.is_congested else (QColor("#fab387") if is_eval else (self._color_path_green if is_path_a_active else self._color_path_idle))
             thick_a = 5 if is_path_a_active or self.flow_cross_active else 2
-            label_a = f"Path A: {self.path_a_load:.1f}M " + ("[CONGESTED]" if self.is_congested else "")
-            draw_link(pos_s1, pos_s2, color_a, thick_a, label_a, alert=self.is_congested)
-            draw_link(pos_s2, pos_s4, color_a, thick_a)
+            tag_a = "[🚨 CONGESTED]" if self.is_congested else (f"[⚠️ EVALUATING: {getattr(self, 'consecutive_breaches', 1)}/3]" if is_eval else ("[ACTIVE]" if is_path_a_active else "[STANDBY]"))
+            label_a = f"Path A: {self.path_a_load:.1f}M {tag_a}"
+            meta_a = {"wire_id": "path_a_s1_s2", "src": "s1", "dst": "s2", "segment": "path_a", "load": self.path_a_load, "capacity": 10.0, "is_active": is_path_a_active, "is_alert": self.is_congested, "is_evaluating": is_eval, "breach": getattr(self, "consecutive_breaches", 1)}
+            draw_link(pos_s1, pos_s2, color_a, thick_a, label_a, alert=self.is_congested, evaluating=is_eval, wire_meta=meta_a)
+            draw_link(pos_s2, pos_s4, color_a, thick_a, wire_meta={"wire_id": "path_a_s2_s4", "src": "s2", "dst": "s4", "segment": "path_a", "load": self.path_a_load, "capacity": 10.0, "is_active": is_path_a_active, "is_alert": self.is_congested, "is_evaluating": is_eval})
 
             is_path_b_active = (self.active_path == PATH_ALTERNATE)
             color_b = self._color_path_green if is_path_b_active else self._color_path_idle
             thick_b = 5 if is_path_b_active else 2
-            label_b = f"Path B: {self.path_b_load:.1f}M " + ("[REROUTED]" if is_path_b_active else "[IDLE]")
-            draw_link(pos_s1, pos_s3, color_b, thick_b, label_b)
-            draw_link(pos_s3, pos_s4, color_b, thick_b)
+            label_b = f"Path B: {self.path_b_load:.1f}M " + ("[ACTIVE]" if is_path_b_active else "[STANDBY]")
+            meta_b = {"wire_id": "path_b_s1_s3", "src": "s1", "dst": "s3", "segment": "path_b", "load": self.path_b_load, "capacity": 10.0, "is_active": is_path_b_active, "is_alert": False, "is_evaluating": False}
+            draw_link(pos_s1, pos_s3, color_b, thick_b, label_b, wire_meta=meta_b)
+            draw_link(pos_s3, pos_s4, color_b, thick_b, wire_meta={"wire_id": "path_b_s3_s4", "src": "s3", "dst": "s4", "segment": "path_b", "load": self.path_b_load, "capacity": 10.0, "is_active": is_path_b_active, "is_alert": False, "is_evaluating": False})
 
         # Dynamic Queue Meter on Path A
         q_box_x = int(w * 0.36)
@@ -446,43 +606,6 @@ class AnimatedTopologyCanvas(QWidget):
         painter.setPen(self._color_text_white)
         painter.setFont(self._font_bold_7)
         painter.drawText(q_box_x + 6, q_box_y + 11, f"Queue: {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts")
-
-        def get_pos_on_segment(p1, p2, prog):
-            return (p1[0] + (p2[0] - p1[0]) * prog, p1[1] + (p2[1] - p1[1]) * prog)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        for p in self.packets:
-            painter.setBrush(QBrush(p.color))
-            if p.path.startswith("cross"):
-                path_key = "path_a"
-            else:
-                path_key = self.active_path
-
-            path_info = self.topo_def.get_path(path_key) if self.topo_def else None
-            if not path_info and self.topo_def and self.topo_def.paths:
-                path_info = next(iter(self.topo_def.paths.values()), None)
-
-            hops = path_info.get("hops", []) if path_info else []
-            if len(hops) >= 2:
-                n_segs = len(hops) - 1
-                seg_idx = min(int(p.progress * n_segs), n_segs - 1)
-                seg_prog = (p.progress * n_segs) - seg_idx
-                u_pos = node_positions.get(str(hops[seg_idx]).lower())
-                v_pos = node_positions.get(str(hops[seg_idx + 1]).lower())
-                pt = get_pos_on_segment(u_pos, v_pos, seg_prog) if (u_pos and v_pos) else (w // 2, h // 2)
-            elif len(hops) == 1:
-                sw_pos = node_positions.get(str(hops[0]).lower(), (w // 2, h // 2))
-                h1_pos = node_positions.get("h1", (int(w * 0.1), int(h * 0.3)))
-                h2_pos = node_positions.get("h2", (int(w * 0.9), int(h * 0.3)))
-                pt = get_pos_on_segment(h1_pos, sw_pos, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(sw_pos, h2_pos, (p.progress - 0.5) * 2.0)
-            else:
-                s1_p = node_positions.get("s1", (int(w * 0.26), int(h * 0.5)))
-                s4_p = node_positions.get("s4", (int(w * 0.74), int(h * 0.5)))
-                mid_id = "s2" if 'a' in p.path else "s3"
-                s_mid = node_positions.get(mid_id, (int(w * 0.5), int(h * 0.25)))
-                pt = get_pos_on_segment(s1_p, s_mid, p.progress * 2.0) if p.progress < 0.5 else get_pos_on_segment(s_mid, s4_p, (p.progress - 0.5) * 2.0)
-
-            painter.drawEllipse(int(pt[0]) - 4, int(pt[1]) - 4, 8, 8)
 
         def draw_node(pos, text, subtext, bg_color, is_switch=False):
             rad = 20 if is_switch else 17
@@ -1890,7 +2013,11 @@ class MasterSDNGUI(QMainWindow):
         """)
 
         # Core networking backends
-        self.controller = SDNController(congestion_threshold_mbps=CONGESTION_THRESHOLD_MBPS, adaptive_routing_enabled=True)
+        self.controller = SDNController(
+            congestion_threshold_mbps=CONGESTION_THRESHOLD_MBPS,
+            adaptive_routing_enabled=True,
+            triggers_required=3
+        )
         self.controller.start()
 
         self.emulator = NetworkEmulator(controller=self.controller, ingress_port=9000)
@@ -2873,12 +3000,29 @@ class MasterSDNGUI(QMainWindow):
 
         active_path = ctrl_status["active_path"]
         both_congested = bool(ctrl_status.get("all_paths_congested", ctrl_status.get("both_paths_congested")))
-        status_key = f"{active_path}_{both_congested}"
+        is_evaluating = ctrl_status.get("is_evaluating", False)
+        consecutive_breaches = ctrl_status.get("consecutive_breaches", 0)
+        triggers_required = ctrl_status.get("triggers_required", 3)
+
+        load_a = ctrl_status.get("path_a_load_mbps", 0.0)
+        load_b = ctrl_status.get("path_b_load_mbps", 0.0)
+        path_loads = ctrl_status.get("path_loads", {})
+        active_norm = "path_b" if ("path-b" in active_path.lower() or "alternate" in active_path.lower()) else ("path_a" if ("path-a" in active_path.lower() or "primary" in active_path.lower()) else active_path)
+        active_load = path_loads.get(active_path, path_loads.get(active_norm, load_a if active_norm == "path_a" else load_b))
+        is_congested = (active_load >= self.controller.congestion_threshold_mbps)
+
+        status_key = f"{active_path}_{both_congested}_{is_evaluating}_{consecutive_breaches}"
         if status_key != self._last_active_path_status:
             self._last_active_path_status = status_key
             if both_congested:
                 self.lbl_active_path_status.setText("CRITICAL: ALL PATHS CONGESTED")
                 self.lbl_active_path_status.setStyleSheet("background: #f38ba8; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
+            elif is_evaluating:
+                thresh = getattr(self.controller, 'congestion_threshold_mbps', 8.0)
+                self.lbl_active_path_status.setText(
+                    f"⚠️ CONGESTION BREACH DETECTED: {active_load:.1f}M >= {thresh:.1f}M [Evaluating Persistence: {consecutive_breaches}/{triggers_required}]"
+                )
+                self.lbl_active_path_status.setStyleSheet("background: #fab387; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
             elif active_path == PATH_PRIMARY:
                 self.lbl_active_path_status.setText("ACTIVE PATH: Path-A (Primary)")
                 self.lbl_active_path_status.setStyleSheet("background: #a6e3a1; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
@@ -2896,19 +3040,15 @@ class MasterSDNGUI(QMainWindow):
             self.lbl_flow_table.setText(flow_text)
             self._last_flow_text = flow_text
 
-        load_a = ctrl_status.get("path_a_load_mbps", 0.0)
-        load_b = ctrl_status.get("path_b_load_mbps", 0.0)
-        path_loads = ctrl_status.get("path_loads", {})
-        active_norm = "path_b" if ("path-b" in active_path.lower() or "alternate" in active_path.lower()) else ("path_a" if ("path-a" in active_path.lower() or "primary" in active_path.lower()) else active_path)
-        active_load = path_loads.get(active_path, path_loads.get(active_norm, load_a if active_norm == "path_a" else load_b))
-        is_congested = (active_load >= self.controller.congestion_threshold_mbps)
-
         # Update dynamic path status pills
         for p_id, pill in getattr(self, "path_status_pills", {}).items():
             p_load = path_loads.get(p_id, load_a if p_id == "path_a" else load_b)
             if p_id == active_path or p_id == active_norm:
                 is_p_cong = (p_load >= self.controller.congestion_threshold_mbps)
-                if is_p_cong:
+                if is_p_cong and is_evaluating:
+                    pill.setText(f"ACTIVE: {p_load:.1f}M [EVAL {consecutive_breaches}/{triggers_required}]")
+                    pill.setStyleSheet("background-color: #fab387; color: #11111b; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")
+                elif is_p_cong:
                     pill.setText(f"ACTIVE: {p_load:.1f}M [CONG]")
                     pill.setStyleSheet("background-color: #f38ba8; color: #11111b; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")
                 else:
@@ -2918,6 +3058,15 @@ class MasterSDNGUI(QMainWindow):
                 pill.setText(f"STANDBY: {p_load:.1f}M")
                 pill.setStyleSheet("background-color: #313244; color: #a6adc8; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")
 
+        # Update congestion injection button state dynamically
+        if getattr(self, "is_cross_burst_active", False):
+            burst_rate = float(self.slider_cross_rate.value())
+            self.btn_inject_congestion.setText(f"💥 Cross-Traffic Bursting ({burst_rate:.1f}M)...")
+            self.btn_inject_congestion.setStyleSheet("background-color: #fab387; color: #11111b; font-weight: bold; padding: 7px;")
+        else:
+            self.btn_inject_congestion.setText("⚡ Inject Congestion (Burst on Path A)")
+            self.btn_inject_congestion.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold; padding: 7px;")
+
         q_cur = self.emulator.link_path_a.packet_queue.qsize()
         q_max = self.emulator.link_path_a.max_queue
         q_pct = (q_cur / max(1, q_max)) * 100.0
@@ -2926,7 +3075,10 @@ class MasterSDNGUI(QMainWindow):
         self.topo_canvas.update_state(
             active_path, load_a, load_b, is_congested,
             q_pct, q_max, is_main_active, self.is_cross_burst_active,
-            path_loads=path_loads
+            path_loads=path_loads,
+            is_evaluating=is_evaluating,
+            consecutive_breaches=consecutive_breaches,
+            triggers_required=triggers_required
         )
 
         elapsed = time.time() - self.start_epoch

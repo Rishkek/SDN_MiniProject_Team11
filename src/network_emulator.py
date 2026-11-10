@@ -76,6 +76,8 @@ class SimulatedLink:
             self.delay_sec = max(0.0001, float(delay_ms) / 1000.0)
 
     def start(self, forward_handler):
+        if self._running:
+            return
         self.forward_handler = forward_handler
         self._running = True
         self._thread = threading.Thread(target=self._drain_loop, daemon=True)
@@ -258,7 +260,7 @@ class NetworkEmulator:
             except OSError:
                 pass
 
-        for link in self.path_links.values():
+        for link in set(self.path_links.values()):
             link.start(forward_to_dest)
 
         self._running = True
@@ -267,7 +269,7 @@ class NetworkEmulator:
 
     def stop(self):
         self._running = False
-        for link in self.path_links.values():
+        for link in set(self.path_links.values()):
             link.stop()
         if self._sock:
             self._sock.close()
