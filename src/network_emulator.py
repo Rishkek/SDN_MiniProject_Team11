@@ -82,6 +82,10 @@ class SimulatedLink:
         self._thread.start()
 
     def stop(self):
+        # Allow any in-flight packets in the buffer to finish delivering
+        t_wait = time.time()
+        while not self.packet_queue.empty() and (time.time() - t_wait) < 0.3:
+            time.sleep(0.01)
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)

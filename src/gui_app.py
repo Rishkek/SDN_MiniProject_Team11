@@ -386,7 +386,11 @@ class AnimatedTopologyCanvas(QWidget):
 
                 seg = link.get("path_segment", "")
                 if seg:
-                    is_active = (self.active_path.lower() == seg.lower())
+                    act_lower = self.active_path.lower()
+                    seg_lower = seg.lower()
+                    is_active = (act_lower == seg_lower or seg_lower in act_lower or 
+                                 (seg_lower == "path_a" and ("path-a" in act_lower or "primary" in act_lower)) or 
+                                 (seg_lower == "path_b" and ("path-b" in act_lower or "alternate" in act_lower)))
                     load = self.path_loads.get(seg, self.path_a_load if seg == "path_a" else self.path_b_load)
                     is_alert = (is_active and self.is_congested)
                     color = self._color_path_red if is_alert else (self._color_path_green if is_active else self._color_path_idle)
@@ -1907,6 +1911,12 @@ class MasterSDNGUI(QMainWindow):
         self._last_active_path_status = ""
         self._last_recovery_time_sec = None
 
+        # Multi-path dynamic UI collections
+        self.path_cards: Dict[str, QFrame] = {}
+        self.path_bw_sliders: Dict[str, QSlider] = {}
+        self.path_bw_labels: Dict[str, QLabel] = {}
+        self.path_status_pills: Dict[str, QLabel] = {}
+
         self._init_menu_bar()
         self._init_header_bar()
         self._init_main_workspace()
@@ -2592,6 +2602,15 @@ class MasterSDNGUI(QMainWindow):
             if widget:
                 widget.deleteLater()
 
+        if not hasattr(self, "path_cards"):
+            self.path_cards = {}
+        if not hasattr(self, "path_bw_sliders"):
+            self.path_bw_sliders = {}
+        if not hasattr(self, "path_bw_labels"):
+            self.path_bw_labels = {}
+        if not hasattr(self, "path_status_pills"):
+            self.path_status_pills = {}
+
         self.path_cards.clear()
         self.path_bw_sliders.clear()
         self.path_bw_labels.clear()
@@ -2880,13 +2899,14 @@ class MasterSDNGUI(QMainWindow):
         load_a = ctrl_status.get("path_a_load_mbps", 0.0)
         load_b = ctrl_status.get("path_b_load_mbps", 0.0)
         path_loads = ctrl_status.get("path_loads", {})
-        active_load = path_loads.get(active_path, load_a if active_path == "path_a" else load_b)
+        active_norm = "path_b" if ("path-b" in active_path.lower() or "alternate" in active_path.lower()) else ("path_a" if ("path-a" in active_path.lower() or "primary" in active_path.lower()) else active_path)
+        active_load = path_loads.get(active_path, path_loads.get(active_norm, load_a if active_norm == "path_a" else load_b))
         is_congested = (active_load >= self.controller.congestion_threshold_mbps)
 
         # Update dynamic path status pills
-        for p_id, pill in self.path_status_pills.items():
+        for p_id, pill in getattr(self, "path_status_pills", {}).items():
             p_load = path_loads.get(p_id, load_a if p_id == "path_a" else load_b)
-            if p_id == active_path:
+            if p_id == active_path or p_id == active_norm:
                 is_p_cong = (p_load >= self.controller.congestion_threshold_mbps)
                 if is_p_cong:
                     pill.setText(f"ACTIVE: {p_load:.1f}M [CONG]")
