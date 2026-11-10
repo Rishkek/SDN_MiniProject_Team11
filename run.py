@@ -20,6 +20,15 @@ import argparse
 import platform
 import subprocess
 
+# In Linux / WSL environments, configure Qt platform plugin to eliminate 'wayland' plugin warning
+if sys.platform.startswith("linux"):
+    if "QT_QPA_PLATFORM" not in os.environ:
+        if os.environ.get("DISPLAY"):
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
+        elif not os.environ.get("WAYLAND_DISPLAY"):
+            os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.*=false")
+
 # Add project root to sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:

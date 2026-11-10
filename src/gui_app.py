@@ -36,6 +36,15 @@ from typing import Optional, List, Dict, Any, Deque
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
+# In Linux / WSL environments, configure Qt platform plugin to eliminate 'wayland' plugin warning
+if sys.platform.startswith("linux"):
+    if "QT_QPA_PLATFORM" not in os.environ:
+        if os.environ.get("DISPLAY"):
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
+        elif not os.environ.get("WAYLAND_DISPLAY"):
+            os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.*=false")
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QSlider, QTabWidget, QGroupBox, QGridLayout,
@@ -377,11 +386,7 @@ class AnimatedTopologyCanvas(QWidget):
 
                 seg = link.get("path_segment", "")
                 if seg:
-                    seg_lower = seg.lower()
-                    act_lower = self.active_path.lower()
-                    is_active = (act_lower == seg_lower or seg_lower in act_lower or 
-                                 (seg_lower == "path_a" and ("path-a" in act_lower or "primary" in act_lower)) or 
-                                 (seg_lower == "path_b" and ("path-b" in act_lower or "alternate" in act_lower)))
+                    is_active = (self.active_path.lower() == seg.lower())
                     load = self.path_loads.get(seg, self.path_a_load if seg == "path_a" else self.path_b_load)
                     is_alert = (is_active and self.is_congested)
                     color = self._color_path_red if is_alert else (self._color_path_green if is_active else self._color_path_idle)
@@ -2875,14 +2880,13 @@ class MasterSDNGUI(QMainWindow):
         load_a = ctrl_status.get("path_a_load_mbps", 0.0)
         load_b = ctrl_status.get("path_b_load_mbps", 0.0)
         path_loads = ctrl_status.get("path_loads", {})
-        active_norm = getattr(self.controller, "_normalize_path_id", lambda x: x)(active_path)
-        active_load = path_loads.get(active_norm, path_loads.get(active_path, load_a if active_norm == "path_a" else load_b))
+        active_load = path_loads.get(active_path, load_a if active_path == "path_a" else load_b)
         is_congested = (active_load >= self.controller.congestion_threshold_mbps)
 
         # Update dynamic path status pills
         for p_id, pill in self.path_status_pills.items():
             p_load = path_loads.get(p_id, load_a if p_id == "path_a" else load_b)
-            if p_id == active_norm or p_id == active_path:
+            if p_id == active_path:
                 is_p_cong = (p_load >= self.controller.congestion_threshold_mbps)
                 if is_p_cong:
                     pill.setText(f"ACTIVE: {p_load:.1f}M [CONG]")

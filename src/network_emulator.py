@@ -172,7 +172,9 @@ class NetworkEmulator:
         self.link_path_b = SimulatedLink("Path-B (S1->S3->S4)", capacity_mbps=LINK_CAPACITY_MBPS, delay_ms=PATH_B_DELAY_MS)
         self.path_links: Dict[str, SimulatedLink] = {
             "path_a": self.link_path_a,
-            "path_b": self.link_path_b
+            "path_b": self.link_path_b,
+            PATH_PRIMARY: self.link_path_a,
+            PATH_ALTERNATE: self.link_path_b
         }
 
     def apply_topology(self, topo):
@@ -208,8 +210,10 @@ class NetworkEmulator:
 
         if "path_a" in self.path_links:
             self.link_path_a = self.path_links["path_a"]
+            self.path_links[PATH_PRIMARY] = self.link_path_a
         if "path_b" in self.path_links:
             self.link_path_b = self.path_links["path_b"]
+            self.path_links[PATH_ALTERNATE] = self.link_path_b
 
     def register_packet_callback(self, cb):
         """Registers a callback function to receive packet transmission events."""
@@ -311,9 +315,13 @@ class NetworkEmulator:
         while self._running:
             now = time.time()
             if now - last_telemetry >= 0.25:
-                # Feed virtual switch port statistics to controller for all dynamic paths
+                # Feed virtual switch port statistics to controller for all unique dynamic paths
+                seen_links = set()
                 for p_id, link in self.path_links.items():
-                    port_no = self.controller.path_ports.get(p_id, 2 if p_id == "path_a" else 3)
+                    if link in seen_links:
+                        continue
+                    seen_links.add(link)
+                    port_no = self.controller.path_ports.get(p_id, 2 if p_id in ("path_a", PATH_PRIMARY) else 3)
                     self.controller.record_external_stats("s1", port_no=port_no, rx_bytes=link.rx_bytes, tx_bytes=link.rx_bytes)
                 last_telemetry = now
 
@@ -340,8 +348,12 @@ class NetworkEmulator:
                 dest = ("127.0.0.1", self.main_dest_port)
                 # Query controller for current active path dynamically
                 active_path_key = self.controller.current_active_path
-                active_id = getattr(self.controller, "_normalize_path_id", lambda x: x)(active_path_key)
-                active_link = self.path_links.get(active_id) or self.path_links.get(active_path_key) or self.link_path_a
+                active_link = self.path_links.get(active_path_key)
+                if not active_link:
+                    if "Path-B" in str(active_path_key) or active_path_key == "path_b":
+                        active_link = self.link_path_b
+                    else:
+                        active_link = self.link_path_a
 
             elif flow_id == FLOW_CROSS:
                 dest = ("127.0.0.1", self.cross_dest_port)

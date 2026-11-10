@@ -203,18 +203,9 @@ class TopologyDefinition:
         return default
 
     def get_path(self, path_key: str, default: Any = None) -> Any:
-        """Retrieves path specification by key ('path_a', 'path_b') or name."""
-        if not path_key:
-            return default
-        if path_key in self.paths:
-            return self.paths[path_key]
-        p_lower = str(path_key).lower()
-        if p_lower in self.paths:
-            return self.paths[p_lower]
-        for pid, pdata in self.paths.items():
-            if str(pdata.get("name", "")).lower() == p_lower or pid in p_lower:
-                return pdata
-        return default
+        """Retrieves path specification by key ('path_a', 'path_b')."""
+        val = self.paths.get(path_key)
+        return val if val is not None else default
 
     def to_dict(self) -> Dict[str, Any]:
         """Exports definition back to serializable dictionary."""
