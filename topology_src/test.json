@@ -1,0 +1,197 @@
+{
+  "format": "network-topology",
+  "version": "1.0",
+  "topology_name": "David Topology",
+  "description": "Generated from test.pol via TopoNet Compiler",
+  "switches": [
+    {
+      "id": "s1",
+      "dpid": 1,
+      "name": "S1",
+      "role": "ingress",
+      "protocols": "OpenFlow13",
+      "subtext": "Ingress",
+      "x": 0.77,
+      "y": 0.43
+    },
+    {
+      "id": "s2",
+      "dpid": 2,
+      "name": "S2",
+      "role": "core",
+      "protocols": "OpenFlow13",
+      "subtext": "Core",
+      "x": 0.80,
+      "y": 0.71
+    },
+    {
+      "id": "s3",
+      "dpid": 3,
+      "name": "S3",
+      "role": "core",
+      "protocols": "OpenFlow13",
+      "subtext": "Core",
+      "x": 0.37,
+      "y": 0.85
+    },
+    {
+      "id": "s4",
+      "dpid": 4,
+      "name": "S4",
+      "role": "core",
+      "protocols": "OpenFlow13",
+      "subtext": "Core",
+      "x": 0.10,
+      "y": 0.64
+    },
+    {
+      "id": "s5",
+      "dpid": 5,
+      "name": "S5",
+      "role": "egress",
+      "protocols": "OpenFlow13",
+      "subtext": "Egress",
+      "x": 0.40,
+      "y": 0.39
+    }
+  ],
+  "hosts": [
+    {
+      "id": "h1",
+      "name": "H1",
+      "ip": "10.0.0.1",
+      "role": "main_sender",
+      "subtext": "10.0.0.1",
+      "color": "#1e66f5",
+      "connected_to": "s1",
+      "x": 0.51,
+      "y": 0.15
+    },
+    {
+      "id": "h2",
+      "name": "H2",
+      "ip": "10.0.0.2",
+      "role": "main_receiver",
+      "subtext": "10.0.0.2",
+      "color": "#a6e3a1",
+      "connected_to": "s5",
+      "x": 0.90,
+      "y": 0.19
+    }
+  ],
+  "links": [
+    {
+      "id": "link_h1_s1",
+      "src": "h1",
+      "dst": "s1",
+      "label": "H1->S1",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "cable_alias": "hi",
+      "pen_color": "#89b4fa"
+    },
+    {
+      "id": "link_s1_s2",
+      "src": "s1",
+      "dst": "s2",
+      "label": "S1->S2",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "hi"
+    },
+    {
+      "id": "link_s2_s3",
+      "src": "s2",
+      "dst": "s3",
+      "label": "S2->S3",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "hi"
+    },
+    {
+      "id": "link_s3_s4",
+      "src": "s3",
+      "dst": "s4",
+      "label": "S3->S4",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "hi"
+    },
+    {
+      "id": "link_s4_s5",
+      "src": "s4",
+      "dst": "s5",
+      "label": "S4->S5",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "hi"
+    },
+    {
+      "id": "link_s1_s5",
+      "src": "s1",
+      "dst": "s5",
+      "label": "Path A",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "hi",
+      "path_segment": "path_a",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s5_h2",
+      "src": "s5",
+      "dst": "h2",
+      "label": "S5->H2",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "cable_alias": "hi",
+      "pen_color": "#89b4fa"
+    }
+  ],
+  "paths": {
+    "path_a": {
+      "id": "path_a",
+      "name": "Path-A (S1 -> S5)",
+      "role": "primary",
+      "hops": [
+        "s1",
+        "s5"
+      ],
+      "delay_ms": 5.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 2
+    }
+  },
+  "traffic_profile": {
+    "main_stream": {
+      "src_host": "h1",
+      "dst_host": "h2",
+      "dst_port": 9999,
+      "nominal_rate_mbps": 6.0,
+      "packet_size_bytes": 1024
+    }
+  },
+  "sdn_policy": {
+    "congestion_threshold_mbps": 8.0,
+    "congestion_loss_threshold_pct": 3.0,
+    "hysteresis_recovery_mbps": 4.5,
+    "poll_interval_sec": 0.5,
+    "consecutive_triggers_required": 2,
+    "consecutive_recoveries_required": 4
+  }
+}

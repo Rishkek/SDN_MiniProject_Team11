@@ -1,0 +1,22 @@
+pull "std.polh"
+
+topology david:
+    spawns {
+        spawn cable.high_speed as hi;
+        spawn cable.medium as med;
+        spawn switch as a,b,c;
+        spawn ingress as in;
+        spawn egress as out;
+        spawn sender as h1;
+        spawn reciever as h2;
+    }
+
+    connections {
+        (h1, hi, in);
+        (in, hi, c);
+        (c, hi, b);
+        (b, hi, a);
+        (a, hi, out);
+        (in, hi, out);
+        (out, hi, h2);
+    }

@@ -28,8 +28,18 @@ def main():
     parser.add_argument("-o", "--output", help="Path to destination .json file")
     parser.add_argument("-t", "--type", default="auto", help="Topology layout type (diamond, star, ring, bus, mesh, auto)")
     parser.add_argument("--all", action="store_true", help="Compile all .pol files in pol_src/ to topology_src/")
+    parser.add_argument("--native", action="store_true", help="Invoke native C binary (polc.exe)")
 
     args = parser.parse_args()
+
+    if args.native:
+        polc_bin = "polc.exe" if os.name == "nt" else "./polc"
+        if os.path.exists(polc_bin):
+            pass_args = [a for a in sys.argv[1:] if a != "--native"]
+            cmd = f"{polc_bin} {' '.join(pass_args)}"
+            sys.exit(os.system(cmd))
+        else:
+            print(f"[WARN] Native binary '{polc_bin}' not found. Falling back to Python engine.")
 
     if args.all:
         pol_files = glob.glob(os.path.join("pol_src", "*.pol"))

@@ -228,3 +228,32 @@ class TestSimplifiedSyntaxFeatures:
         tokens = Lexer(code).tokenize()
         ast = Parser(tokens).parse()
         assert len(ast.statements) == 1
+
+
+class TestNativeCCompiler:
+    """Verifies that the native C compiler (polc.exe) builds and compiles valid topologies."""
+
+    def test_native_c_binary_exists(self):
+        polc_exe = "polc.exe" if os.name == "nt" else "./polc"
+        assert os.path.exists(polc_exe), f"Native compiler {polc_exe} should exist"
+
+    def test_native_c_compile_diamond(self, tmp_path):
+        out_json = str(tmp_path / "diamond_c.json")
+        cmd = f"polc.exe pol_src/diamond.pol -o \"{out_json}\""
+        ret = os.system(cmd)
+        assert ret == 0
+        assert os.path.exists(out_json)
+        topo = load_topology(out_json)
+        assert len(topo.switches) == 4
+        assert len(topo.hosts) == 4
+        assert len(topo.links) == 8
+
+    def test_native_c_compile_test_david(self, tmp_path):
+        out_json = str(tmp_path / "test_c.json")
+        cmd = f"polc.exe pol_src/test.pol -o \"{out_json}\""
+        ret = os.system(cmd)
+        assert ret == 0
+        assert os.path.exists(out_json)
+        topo = load_topology(out_json)
+        assert len(topo.switches) == 5
+        assert len(topo.hosts) == 2
