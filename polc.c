@@ -1150,8 +1150,11 @@ static void synthesize_paths(Topology *topo) {
         } else if (p_idx == 3) {
             strcpy(p->id, "path_d");
             strcpy(p->role, "backup");
-        } else {
+        } else if (p_idx < 26) {
             snprintf(p->id, sizeof(p->id), "path_%c", 'a' + p_idx);
+            strcpy(p->role, "backup");
+        } else {
+            snprintf(p->id, sizeof(p->id), "path_%d", p_idx + 1);
             strcpy(p->role, "backup");
         }
 

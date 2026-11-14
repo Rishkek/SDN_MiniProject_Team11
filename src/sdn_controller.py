@@ -80,11 +80,14 @@ class SDNController:
         self.reroute_events: List[Dict[str, Any]] = []
         self.both_paths_congested = False
         self.all_paths_congested = False
+        self.loss_threshold_pct: float = 3.0
+        self.latest_loss_pct: float = 0.0
+        self.latest_latency_ms: float = 0.0
 
         # Multi-path dynamic routing structures
         self.paths: Dict[str, Dict[str, Any]] = {
-            "path_a": {"id": "path_a", "name": PATH_PRIMARY, "role": "primary", "s1_output_port": 2},
-            "path_b": {"id": "path_b", "name": PATH_ALTERNATE, "role": "alternate", "s1_output_port": 3}
+            "path_a": {"id": "path_a", "name": PATH_PRIMARY, "role": "primary", "s1_output_port": 2, "capacity_mbps": 10.0},
+            "path_b": {"id": "path_b", "name": PATH_ALTERNATE, "role": "alternate", "s1_output_port": 3, "capacity_mbps": 10.0}
         }
         self.path_ports: Dict[str, int] = {
             "path_a": 2,
@@ -165,6 +168,30 @@ class SDNController:
         except (FileNotFoundError, subprocess.SubprocessError):
             pass
 
+    def update_path_capacity(self, path_id: str, capacity_mbps: float):
+        """Updates the known bandwidth capacity of a path in Mbps."""
+        with self._lock:
+            cap = max(0.5, float(capacity_mbps))
+            if path_id in self.paths:
+                self.paths[path_id]["capacity_mbps"] = cap
+            if self._is_path_a(path_id):
+                if "path_a" in self.paths:
+                    self.paths["path_a"]["capacity_mbps"] = cap
+                if PATH_PRIMARY in self.paths:
+                    self.paths[PATH_PRIMARY]["capacity_mbps"] = cap
+            elif self._is_path_b(path_id):
+                if "path_b" in self.paths:
+                    self.paths["path_b"]["capacity_mbps"] = cap
+                if PATH_ALTERNATE in self.paths:
+                    self.paths[PATH_ALTERNATE]["capacity_mbps"] = cap
+            logger.info(f"[SDNController] Path '{path_id}' capacity updated to {cap:.1f} Mbps")
+
+    def record_receiver_feedback(self, loss_pct: float, latency_ms: float = 0.0):
+        """Records end-to-end packet loss and latency feedback from receiver."""
+        with self._lock:
+            self.latest_loss_pct = float(loss_pct)
+            self.latest_latency_ms = float(latency_ms)
+
     def _is_path_a(self, path: str) -> bool:
         return path == PATH_PRIMARY or path in ("path_a", "Path-A")
 
@@ -179,6 +206,8 @@ class SDNController:
             for idx, (p_id, p_info) in enumerate(self.paths.items()):
                 port = int(p_info.get("s1_output_port", idx + 2))
                 self.path_ports[p_id] = port
+                if "capacity_mbps" not in p_info:
+                    p_info["capacity_mbps"] = 10.0
                 if p_id not in self.path_loads:
                     self.path_loads[p_id] = 0.0
 
@@ -232,13 +261,34 @@ class SDNController:
             else:
                 active_load = self.path_loads.get(active_path, 0.0)
 
+            # Retrieve active path capacity to determine effective threshold
+            active_cap = float(self.paths.get(active_path, {}).get("capacity_mbps", 10.0))
+            if self._is_path_a(active_path) and "path_a" in self.paths:
+                active_cap = float(self.paths["path_a"].get("capacity_mbps", active_cap))
+            elif self._is_path_b(active_path) and "path_b" in self.paths:
+                active_cap = float(self.paths["path_b"].get("capacity_mbps", active_cap))
+
+            effective_threshold = min(self.congestion_threshold_mbps, max(0.5, active_cap * 0.80))
+
+            # Multi-metric congestion evaluation:
+            # 1. Bandwidth utilization breach (load >= 80% of capacity or >= configured threshold)
+            # 2. End-to-end packet loss breach (loss >= configured loss threshold, default 3.0%)
+            load_breached = (active_load >= effective_threshold)
+            loss_breached = (getattr(self, "latest_loss_pct", 0.0) >= getattr(self, "loss_threshold_pct", 3.0))
+            is_congested = load_breached or loss_breached
+
             # Congestion evaluation on the current active path
             req_triggers = getattr(self, "triggers_required", CONSECUTIVE_TRIGGERS_REQUIRED)
-            if active_load >= self.congestion_threshold_mbps:
+            if is_congested:
                 self.consecutive_breaches += 1
+                reason_detail = (
+                    f"Load {active_load:.2f} Mbps >= {effective_threshold:.2f} Mbps (Cap {active_cap:.1f} Mbps)"
+                    if load_breached else
+                    f"Packet Loss {self.latest_loss_pct:.1f}% >= {getattr(self, 'loss_threshold_pct', 3.0):.1f}%"
+                )
                 logger.warning(
-                    f"[CONGESTION WARNING] {active_path} Load: {active_load:.2f} Mbps >= "
-                    f"Threshold ({self.congestion_threshold_mbps:.2f} Mbps) [Breach {self.consecutive_breaches}/{req_triggers}]"
+                    f"[CONGESTION WARNING] {active_path} Congestion Detected! {reason_detail} "
+                    f"[Breach {self.consecutive_breaches}/{req_triggers}]"
                 )
 
                 if self.consecutive_breaches >= req_triggers:
@@ -249,16 +299,22 @@ class SDNController:
                         and not (self._is_path_a(active_path) and self._is_path_a(p))
                         and not (self._is_path_b(active_path) and self._is_path_b(p))
                     ]
-                    viable_paths = [
-                        p for p in candidate_paths
-                        if self.path_loads.get(p, 0.0) < self.congestion_threshold_mbps
-                    ]
+
+                    # Filter viable paths: must not be overloaded and must have adequate capacity
+                    viable_paths = []
+                    for p in candidate_paths:
+                        p_cap = float(self.paths.get(p, {}).get("capacity_mbps", 10.0))
+                        p_thresh = min(self.congestion_threshold_mbps, max(0.5, p_cap * 0.80))
+                        p_load = self.path_loads.get(p, 0.0)
+                        # Path must have load below its threshold and capacity >= 2.0M (not a choked bottleneck)
+                        if p_load < p_thresh and p_cap >= 2.0:
+                            viable_paths.append(p)
 
                     if not viable_paths:
                         self.both_paths_congested = True
                         self.all_paths_congested = True
                         logger.error(
-                            f"[CONGESTION CRITICAL] All candidate paths are overloaded! "
+                            f"[CONGESTION CRITICAL] All candidate paths are overloaded or choked! "
                             "Aborting reroute to unusable backup link. Fallback: Requesting UDP sender rate adaptation."
                         )
                     elif self.adaptive_routing_enabled:
@@ -274,12 +330,15 @@ class SDNController:
                         elif self.reroute_policy == "max_headroom":
                             best_path = max(
                                 viable_paths,
-                                key=lambda p: (float(self.paths[p].get("capacity_mbps", 10.0)) - self.path_loads.get(p, 0.0))
+                                key=lambda p: (float(self.paths[p].get("capacity_mbps", 10.0)) - self.path_loads.get(p, 0.0), -len(self.paths[p].get("hops", [])))
                             )
-                        else:  # 'least_loaded' default
+                        else:  # 'least_loaded' default: lowest utilization (load/cap), then shortest hop
                             best_path = min(
                                 viable_paths,
-                                key=lambda p: (self.path_loads.get(p, 0.0), len(self.paths[p].get("hops", [])))
+                                key=lambda p: (
+                                    self.path_loads.get(p, 0.0) / max(0.1, float(self.paths[p].get("capacity_mbps", 10.0))),
+                                    len(self.paths[p].get("hops", []))
+                                )
                             )
 
                         target_path = best_path
@@ -288,10 +347,11 @@ class SDNController:
                         elif self._is_path_a(best_path) and self.current_active_path == PATH_ALTERNATE:
                             target_path = PATH_PRIMARY
 
+                        best_cap = float(self.paths[best_path].get("capacity_mbps", 10.0))
                         best_load = self.path_loads.get(best_path, 0.0)
                         self._trigger_reroute(
                             to_path=target_path,
-                            reason=f"Path {active_path} congested ({active_load:.2f} Mbps). Auto-rerouting to best path {target_path} ({best_load:.2f} Mbps)"
+                            reason=f"Path {active_path} congested ({reason_detail}). Auto-rerouting to best path {target_path} (Cap: {best_cap:.1f}M, Load: {best_load:.2f}M)"
                         )
                     else:
                         logger.info(f"[STATIC ROUTING ACTIVE] Congestion detected on {active_path} but adaptive rerouting is disabled.")
@@ -301,13 +361,15 @@ class SDNController:
                 self.all_paths_congested = False
 
             # Hysteresis recovery logic: if not on primary path, check if primary has cooled down
-            if not self._is_path_a(active_path):
+            if not self._is_path_a(active_path) and ("path_a" in self.paths or PATH_PRIMARY in self.paths):
+                primary_cap = float(self.paths.get("path_a", self.paths.get(PATH_PRIMARY, {})).get("capacity_mbps", 10.0))
                 primary_load = self.latest_path_a_load_mbps
-                if primary_load < HYSTERESIS_RECOVERY_MBPS and active_load < self.congestion_threshold_mbps:
+                # Only revert if primary load dropped below recovery threshold AND primary capacity is healthy (>= 5.0M)
+                if primary_load < HYSTERESIS_RECOVERY_MBPS and primary_cap >= 5.0 and not is_congested:
                     self.consecutive_recoveries += 1
                     if self.auto_revert_enabled and self.consecutive_recoveries >= 4:
                         logger.info(
-                            f"[HYSTERESIS RECOVERY] Primary path cooled down ({primary_load:.2f} Mbps < {HYSTERESIS_RECOVERY_MBPS} Mbps). Reverting to primary path."
+                            f"[HYSTERESIS RECOVERY] Primary path cooled down ({primary_load:.2f} Mbps < {HYSTERESIS_RECOVERY_MBPS} Mbps, Cap: {primary_cap:.1f} Mbps). Reverting to primary path."
                         )
                         target = PATH_PRIMARY if active_path == PATH_ALTERNATE else "path_a"
                         self._trigger_reroute(to_path=target, reason="Primary path traffic dropped below recovery threshold")
@@ -333,6 +395,7 @@ class SDNController:
         self.current_active_path = to_path
         self.total_reroutes += 1
         self.consecutive_breaches = 0
+        self.latest_loss_pct = 0.0
 
         event = {
             "timestamp": time.time(),
@@ -352,12 +415,14 @@ class SDNController:
         Pushes OpenFlow 1.3 flow rule to switch s1 via ovs-ofctl or virtual table.
         Dynamically routes to the corresponding switch port for the chosen path.
         """
-        if self._is_path_b(path):
-            output_port = 3
-        elif self._is_path_a(path):
-            output_port = 2
-        else:
-            output_port = self.path_ports.get(path, 2)
+        output_port = self.path_ports.get(path)
+        if output_port is None:
+            if self._is_path_b(path):
+                output_port = 3
+            elif self._is_path_a(path):
+                output_port = 2
+            else:
+                output_port = 2
         cmd = [
             "ovs-ofctl", "-O", "OpenFlow13", "add-flow", "s1",
             f"priority=100,udp,nw_src={HOST_H1_IP},nw_dst={HOST_H2_IP},tp_dst={MAIN_UDP_PORT},"
@@ -427,14 +492,19 @@ class SDNController:
             pass
 
         # Emulated / Standalone OpenFlow 1.3 Controller Rule Table
-        is_b = self._is_path_b(self.current_active_path)
-        out_port = "Port 3 (Path B via S3) [DYNAMICALLY REROUTED]" if is_b else "Port 2 (Path A via S2) [DEFAULT BASELINE]"
-        active_tag = "ACTIVE (OFFLOAD)" if is_b else "ACTIVE (PRIMARY)"
+        curr_p = self.current_active_path
+        output_port = self.path_ports.get(curr_p)
+        if output_port is None:
+            output_port = 3 if self._is_path_b(curr_p) else 2
+        p_name = self.paths.get(curr_p, {}).get("name", curr_p.upper())
+        is_prim = self._is_path_a(curr_p)
+        active_tag = "ACTIVE (PRIMARY)" if is_prim else f"ACTIVE (DYNAMICALLY REROUTED TO {curr_p.upper()})"
+        out_port = f"Port {output_port} ({p_name}) [{active_tag}]"
         
         return (
             f"[OpenFlow 1.3 Active Flow Table - Switch {switch.upper()}]\n"
             f"  Table 0, Priority 10  | match: dl_type=0x0806 (ARP)            | action=FLOOD\n"
-            f"  Table 0, Priority 50  | match: ip,udp,tp_dst={MAIN_UDP_PORT}          | action=OUTPUT {out_port} [{active_tag}]\n"
+            f"  Table 0, Priority 50  | match: ip,udp,tp_dst={MAIN_UDP_PORT}          | action=OUTPUT {out_port}\n"
             f"  Table 0, Priority 50  | match: ip,udp,tp_dst=9998              | action=OUTPUT Port 2 (Path A via S2)\n"
             f"  Table 0, Priority 1   | match: ip                             | action=NORMAL"
         )
@@ -443,6 +513,14 @@ class SDNController:
         """Provides status summary for GUI, CLI, or benchmark evaluators."""
         with self._lock:
             req = getattr(self, "triggers_required", CONSECUTIVE_TRIGGERS_REQUIRED)
+            active_p = self.current_active_path
+            active_cap = float(self.paths.get(active_p, {}).get("capacity_mbps", 10.0))
+            if self._is_path_a(active_p) and "path_a" in self.paths:
+                active_cap = float(self.paths["path_a"].get("capacity_mbps", active_cap))
+            elif self._is_path_b(active_p) and "path_b" in self.paths:
+                active_cap = float(self.paths["path_b"].get("capacity_mbps", active_cap))
+            eff_thresh = min(self.congestion_threshold_mbps, max(0.5, active_cap * 0.80))
+
             return {
                 "active_path": self.current_active_path,
                 "adaptive_enabled": self.adaptive_routing_enabled,
@@ -451,9 +529,14 @@ class SDNController:
                 "consecutive_breaches": self.consecutive_breaches,
                 "triggers_required": req,
                 "is_evaluating": (0 < self.consecutive_breaches < req),
+                "effective_threshold": round(eff_thresh, 2),
+                "active_path_capacity": round(active_cap, 2),
+                "latest_loss_pct": round(getattr(self, "latest_loss_pct", 0.0), 2),
+                "loss_threshold_pct": getattr(self, "loss_threshold_pct", 3.0),
                 "path_a_load_mbps": round(self.latest_path_a_load_mbps, 2),
                 "path_b_load_mbps": round(self.latest_path_b_load_mbps, 2),
                 "path_loads": {p: round(ld, 2) for p, ld in self.path_loads.items()},
+                "path_capacities": {p: round(float(info.get("capacity_mbps", 10.0)), 2) for p, info in self.paths.items()},
                 "available_paths": list(self.paths.keys()),
                 "reroute_policy": self.reroute_policy,
                 "threshold_mbps": self.congestion_threshold_mbps,

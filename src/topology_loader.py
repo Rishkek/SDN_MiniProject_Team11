@@ -203,9 +203,25 @@ class TopologyDefinition:
         return default
 
     def get_path(self, path_key: str, default: Any = None) -> Any:
-        """Retrieves path specification by key ('path_a', 'path_b')."""
+        """Retrieves path specification by key ('path_a', 'path_b', etc.) with alias and case-insensitive fallback."""
+        if not self.paths:
+            return default
         val = self.paths.get(path_key)
-        return val if val is not None else default
+        if val is not None:
+            return val
+        key_lower = str(path_key).lower()
+        for k, v in self.paths.items():
+            if k.lower() == key_lower:
+                return v
+        if key_lower in ("path_a", "primary", "path-a"):
+            for k in ("path_a", "PATH_A", "primary"):
+                if k in self.paths:
+                    return self.paths[k]
+        elif key_lower in ("path_b", "alternate", "path-b"):
+            for k in ("path_b", "PATH_B", "alternate"):
+                if k in self.paths:
+                    return self.paths[k]
+        return default
 
     def to_dict(self) -> Dict[str, Any]:
         """Exports definition back to serializable dictionary."""

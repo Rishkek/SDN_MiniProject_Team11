@@ -1,0 +1,1169 @@
+{
+  "format": "network-topology",
+  "version": "1.0",
+  "topology_name": "StressTest Topology",
+  "description": "Generated from stress_test.pol via TopoNet Compiler",
+  "switches": [
+    {
+      "id": "s1",
+      "dpid": 1,
+      "name": "S1",
+      "role": "ingress",
+      "protocols": "OpenFlow13",
+      "subtext": "Ingress",
+      "x": 0.59,
+      "y": 0.69
+    },
+    {
+      "id": "s2",
+      "dpid": 2,
+      "name": "S2",
+      "role": "egress",
+      "protocols": "OpenFlow13",
+      "subtext": "Egress",
+      "x": 0.36,
+      "y": 0.40
+    },
+    {
+      "id": "s3",
+      "dpid": 3,
+      "name": "S3",
+      "role": "backup",
+      "protocols": "OpenFlow13",
+      "subtext": "Backup",
+      "x": 0.42,
+      "y": 0.70
+    },
+    {
+      "id": "s4",
+      "dpid": 4,
+      "name": "S4",
+      "role": "backup",
+      "protocols": "OpenFlow13",
+      "subtext": "Backup",
+      "x": 0.38,
+      "y": 0.79
+    },
+    {
+      "id": "s5",
+      "dpid": 5,
+      "name": "S5",
+      "role": "core",
+      "protocols": "OpenFlow13",
+      "subtext": "Core",
+      "x": 0.30,
+      "y": 0.81
+    },
+    {
+      "id": "s6",
+      "dpid": 6,
+      "name": "S6",
+      "role": "backup",
+      "protocols": "OpenFlow13",
+      "subtext": "Backup",
+      "x": 0.16,
+      "y": 0.70
+    },
+    {
+      "id": "s7",
+      "dpid": 7,
+      "name": "S7",
+      "role": "backup",
+      "protocols": "OpenFlow13",
+      "subtext": "Backup",
+      "x": 0.29,
+      "y": 0.64
+    },
+    {
+      "id": "s8",
+      "dpid": 8,
+      "name": "S8",
+      "role": "core",
+      "protocols": "OpenFlow13",
+      "subtext": "Core",
+      "x": 0.23,
+      "y": 0.69
+    },
+    {
+      "id": "s9",
+      "dpid": 9,
+      "name": "S9",
+      "role": "backup",
+      "protocols": "OpenFlow13",
+      "subtext": "Backup",
+      "x": 0.10,
+      "y": 0.56
+    },
+    {
+      "id": "s10",
+      "dpid": 10,
+      "name": "S10",
+      "role": "core",
+      "protocols": "OpenFlow13",
+      "subtext": "Core",
+      "x": 0.16,
+      "y": 0.50
+    },
+    {
+      "id": "s11",
+      "dpid": 11,
+      "name": "S11",
+      "role": "core",
+      "protocols": "OpenFlow13",
+      "subtext": "Core",
+      "x": 0.27,
+      "y": 0.52
+    }
+  ],
+  "hosts": [
+    {
+      "id": "h1",
+      "name": "H1",
+      "ip": "10.0.0.1",
+      "role": "main_sender",
+      "subtext": "10.0.0.1",
+      "color": "#1e66f5",
+      "connected_to": "s1",
+      "x": 0.90,
+      "y": 0.66
+    },
+    {
+      "id": "h2",
+      "name": "H2",
+      "ip": "10.0.0.2",
+      "role": "main_receiver",
+      "subtext": "10.0.0.2",
+      "color": "#a6e3a1",
+      "connected_to": "s2",
+      "x": 0.26,
+      "y": 0.15
+    },
+    {
+      "id": "h3",
+      "name": "H3",
+      "ip": "10.0.0.3",
+      "role": "cross_sender",
+      "subtext": "10.0.0.3",
+      "color": "#f38ba8",
+      "connected_to": "s1",
+      "x": 0.83,
+      "y": 0.85
+    },
+    {
+      "id": "h4",
+      "name": "H4",
+      "ip": "10.0.0.4",
+      "role": "cross_receiver",
+      "subtext": "10.0.0.4",
+      "color": "#df8e1d",
+      "connected_to": "s2",
+      "x": 0.50,
+      "y": 0.17
+    }
+  ],
+  "links": [
+    {
+      "id": "link_h1_s1",
+      "src": "h1",
+      "dst": "s1",
+      "label": "H1->S1",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "cable_alias": "hi",
+      "pen_color": "#89b4fa"
+    },
+    {
+      "id": "link_h3_s1",
+      "src": "h3",
+      "dst": "s1",
+      "label": "H3->S1",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "cable_alias": "hi",
+      "pen_color": "#f38ba8"
+    },
+    {
+      "id": "link_s2_h2",
+      "src": "s2",
+      "dst": "h2",
+      "label": "S2->H2",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "cable_alias": "hi",
+      "pen_color": "#89b4fa"
+    },
+    {
+      "id": "link_s2_h4",
+      "src": "s2",
+      "dst": "h4",
+      "label": "S2->H4",
+      "bw_mbps": 100.0,
+      "delay_ms": 1.0,
+      "max_queue": 1000,
+      "type": "host_edge",
+      "cable_alias": "hi",
+      "pen_color": "#f38ba8"
+    },
+    {
+      "id": "link_s1_s2",
+      "src": "s1",
+      "dst": "s2",
+      "label": "Path A",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "hi",
+      "path_segment": "path_a",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s1_s3",
+      "src": "s1",
+      "dst": "s3",
+      "label": "Path B",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s1_s4",
+      "src": "s1",
+      "dst": "s4",
+      "label": "S1->S4",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med"
+    },
+    {
+      "id": "link_s1_s5",
+      "src": "s1",
+      "dst": "s5",
+      "label": "S1->S5",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med"
+    },
+    {
+      "id": "link_s3_s6",
+      "src": "s3",
+      "dst": "s6",
+      "label": "S3->S6",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s3_s7",
+      "src": "s3",
+      "dst": "s7",
+      "label": "S3->S7",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med"
+    },
+    {
+      "id": "link_s3_s8",
+      "src": "s3",
+      "dst": "s8",
+      "label": "S3->S8",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med"
+    },
+    {
+      "id": "link_s4_s6",
+      "src": "s4",
+      "dst": "s6",
+      "label": "S6->S4",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s4_s7",
+      "src": "s4",
+      "dst": "s7",
+      "label": "S4->S7",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s4_s8",
+      "src": "s4",
+      "dst": "s8",
+      "label": "S4->S8",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_e",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s5_s6",
+      "src": "s5",
+      "dst": "s6",
+      "label": "S6->S5",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_h",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s5_s7",
+      "src": "s5",
+      "dst": "s7",
+      "label": "S5->S7",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_h",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s5_s8",
+      "src": "s5",
+      "dst": "s8",
+      "label": "S5->S8",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_k",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s6_s9",
+      "src": "s6",
+      "dst": "s9",
+      "label": "S6->S9",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med"
+    },
+    {
+      "id": "link_s6_s10",
+      "src": "s6",
+      "dst": "s10",
+      "label": "S6->S10",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med"
+    },
+    {
+      "id": "link_s6_s11",
+      "src": "s6",
+      "dst": "s11",
+      "label": "S6->S11",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med"
+    },
+    {
+      "id": "link_s7_s9",
+      "src": "s7",
+      "dst": "s9",
+      "label": "S7->S9",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s7_s10",
+      "src": "s7",
+      "dst": "s10",
+      "label": "S7->S10",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_c",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s7_s11",
+      "src": "s7",
+      "dst": "s11",
+      "label": "S7->S11",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_d",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s8_s9",
+      "src": "s8",
+      "dst": "s9",
+      "label": "S8->S9",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_e",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s8_s10",
+      "src": "s8",
+      "dst": "s10",
+      "label": "S8->S10",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_f",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s8_s11",
+      "src": "s8",
+      "dst": "s11",
+      "label": "S8->S11",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_g",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s9_s2",
+      "src": "s9",
+      "dst": "s2",
+      "label": "S9->S2",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s10_s2",
+      "src": "s10",
+      "dst": "s2",
+      "label": "S10->S2",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_c",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s11_s2",
+      "src": "s11",
+      "dst": "s2",
+      "label": "S11->S2",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_d",
+      "is_bottleneck": true
+    }
+  ],
+  "paths": {
+    "path_a": {
+      "id": "path_a",
+      "name": "Path-A (S1 -> S2)",
+      "role": "primary",
+      "hops": [
+        "s1",
+        "s2"
+      ],
+      "delay_ms": 5.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 2
+    },
+    "path_b": {
+      "id": "path_b",
+      "name": "Path-B (S1 -> S3 -> S6 -> S4 -> S7 -> S9 -> S2)",
+      "role": "alternate",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 3
+    },
+    "path_c": {
+      "id": "path_c",
+      "name": "Path-C (S1 -> S3 -> S6 -> S4 -> S7 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 4
+    },
+    "path_d": {
+      "id": "path_d",
+      "name": "Path-D (S1 -> S3 -> S6 -> S4 -> S7 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 5
+    },
+    "path_e": {
+      "id": "path_e",
+      "name": "Path-E (S1 -> S3 -> S6 -> S4 -> S8 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 6
+    },
+    "path_f": {
+      "id": "path_f",
+      "name": "Path-F (S1 -> S3 -> S6 -> S4 -> S8 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 7
+    },
+    "path_g": {
+      "id": "path_g",
+      "name": "Path-G (S1 -> S3 -> S6 -> S4 -> S8 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 8
+    },
+    "path_h": {
+      "id": "path_h",
+      "name": "Path-H (S1 -> S3 -> S6 -> S5 -> S7 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s5",
+        "s7",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 9
+    },
+    "path_i": {
+      "id": "path_i",
+      "name": "Path-I (S1 -> S3 -> S6 -> S5 -> S7 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s5",
+        "s7",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 30.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 10
+    },
+    "path_j": {
+      "id": "path_j",
+      "name": "Path-J (S1 -> S3 -> S6 -> S4 -> S7 -> S10 -> S8 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s10",
+        "s8",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 11
+    },
+    "path_k": {
+      "id": "path_k",
+      "name": "Path-K (S1 -> S3 -> S6 -> S4 -> S7 -> S5 -> S8 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s5",
+        "s8",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 12
+    },
+    "path_l": {
+      "id": "path_l",
+      "name": "Path-L (S1 -> S3 -> S6 -> S4 -> S7 -> S11 -> S8 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s11",
+        "s8",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 13
+    },
+    "path_m": {
+      "id": "path_m",
+      "name": "Path-M (S1 -> S3 -> S6 -> S4 -> S7 -> S11 -> S8 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s11",
+        "s8",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 14
+    },
+    "path_n": {
+      "id": "path_n",
+      "name": "Path-N (S1 -> S3 -> S6 -> S4 -> S8 -> S5 -> S7 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s5",
+        "s7",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 15
+    },
+    "path_o": {
+      "id": "path_o",
+      "name": "Path-O (S1 -> S3 -> S6 -> S4 -> S8 -> S5 -> S7 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s5",
+        "s7",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 16
+    },
+    "path_p": {
+      "id": "path_p",
+      "name": "Path-P (S1 -> S3 -> S6 -> S4 -> S8 -> S5 -> S7 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s5",
+        "s7",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 17
+    },
+    "path_q": {
+      "id": "path_q",
+      "name": "Path-Q (S1 -> S3 -> S6 -> S4 -> S7 -> S5 -> S8 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s5",
+        "s8",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 18
+    },
+    "path_r": {
+      "id": "path_r",
+      "name": "Path-R (S1 -> S3 -> S6 -> S4 -> S8 -> S9 -> S7 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s9",
+        "s7",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 19
+    },
+    "path_s": {
+      "id": "path_s",
+      "name": "Path-S (S1 -> S3 -> S6 -> S4 -> S8 -> S9 -> S7 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s9",
+        "s7",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 20
+    },
+    "path_t": {
+      "id": "path_t",
+      "name": "Path-T (S1 -> S3 -> S6 -> S4 -> S7 -> S9 -> S8 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s9",
+        "s8",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 21
+    },
+    "path_u": {
+      "id": "path_u",
+      "name": "Path-U (S1 -> S3 -> S6 -> S4 -> S8 -> S10 -> S7 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s10",
+        "s7",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 22
+    },
+    "path_v": {
+      "id": "path_v",
+      "name": "Path-V (S1 -> S3 -> S6 -> S4 -> S8 -> S10 -> S7 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s10",
+        "s7",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 23
+    },
+    "path_w": {
+      "id": "path_w",
+      "name": "Path-W (S1 -> S3 -> S6 -> S4 -> S7 -> S9 -> S8 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s9",
+        "s8",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 24
+    },
+    "path_x": {
+      "id": "path_x",
+      "name": "Path-X (S1 -> S3 -> S6 -> S4 -> S8 -> S11 -> S7 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s11",
+        "s7",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 25
+    },
+    "path_y": {
+      "id": "path_y",
+      "name": "Path-Y (S1 -> S3 -> S6 -> S4 -> S8 -> S11 -> S7 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s8",
+        "s11",
+        "s7",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 26
+    },
+    "path_z": {
+      "id": "path_z",
+      "name": "Path-Z (S1 -> S3 -> S6 -> S5 -> S7 -> S4 -> S8 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s5",
+        "s7",
+        "s4",
+        "s8",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 27
+    },
+    "path_27": {
+      "id": "path_27",
+      "name": "Path-27 (S1 -> S3 -> S6 -> S5 -> S7 -> S4 -> S8 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s5",
+        "s7",
+        "s4",
+        "s8",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 28
+    },
+    "path_28": {
+      "id": "path_28",
+      "name": "Path-28 (S1 -> S3 -> S6 -> S5 -> S7 -> S4 -> S8 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s5",
+        "s7",
+        "s4",
+        "s8",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 29
+    },
+    "path_29": {
+      "id": "path_29",
+      "name": "Path-29 (S1 -> S3 -> S6 -> S4 -> S7 -> S5 -> S8 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s5",
+        "s8",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 30
+    },
+    "path_30": {
+      "id": "path_30",
+      "name": "Path-30 (S1 -> S3 -> S6 -> S5 -> S7 -> S9 -> S8 -> S10 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s5",
+        "s7",
+        "s9",
+        "s8",
+        "s10",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 31
+    },
+    "path_31": {
+      "id": "path_31",
+      "name": "Path-31 (S1 -> S3 -> S6 -> S5 -> S7 -> S9 -> S8 -> S11 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s5",
+        "s7",
+        "s9",
+        "s8",
+        "s11",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 32
+    },
+    "path_32": {
+      "id": "path_32",
+      "name": "Path-32 (S1 -> S3 -> S6 -> S4 -> S7 -> S10 -> S8 -> S9 -> S2)",
+      "role": "backup",
+      "hops": [
+        "s1",
+        "s3",
+        "s6",
+        "s4",
+        "s7",
+        "s10",
+        "s8",
+        "s9",
+        "s2"
+      ],
+      "delay_ms": 40.0,
+      "capacity_mbps": 10.0,
+      "queue_limit": 100,
+      "s1_output_port": 33
+    }
+  },
+  "traffic_profile": {
+    "main_stream": {
+      "src_host": "h1",
+      "dst_host": "h2",
+      "dst_port": 9999,
+      "nominal_rate_mbps": 6.0,
+      "packet_size_bytes": 1024
+    },
+    "cross_traffic": {
+      "src_host": "h3",
+      "dst_host": "h4",
+      "dst_port": 9998,
+      "burst_rate_mbps": 7.0,
+      "burst_duration_sec": 9.0,
+      "target_path": "path_a"
+    }
+  },
+  "sdn_policy": {
+    "congestion_threshold_mbps": 8.0,
+    "congestion_loss_threshold_pct": 3.0,
+    "hysteresis_recovery_mbps": 4.5,
+    "poll_interval_sec": 0.5,
+    "consecutive_triggers_required": 2,
+    "consecutive_recoveries_required": 4
+  }
+}

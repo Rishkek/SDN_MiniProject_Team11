@@ -487,6 +487,17 @@ class AnimatedTopologyCanvas(QWidget):
 
         # Dynamic link rendering based on active TopologyDefinition
         if self.topo_def and self.topo_def.links:
+            # Determine active hops from topo_def if multi-hop paths are defined
+            active_hops = []
+            if self.topo_def:
+                p_info = self.topo_def.get_path(self.active_path)
+                if p_info:
+                    active_hops = [str(h).lower() for h in p_info.get("hops", [])]
+            active_hop_pairs = set()
+            for h_idx in range(len(active_hops) - 1):
+                active_hop_pairs.add((active_hops[h_idx], active_hops[h_idx + 1]))
+                active_hop_pairs.add((active_hops[h_idx + 1], active_hops[h_idx]))
+
             for idx, link in enumerate(self.topo_def.links):
                 src = str(link.get("src", "")).lower()
                 dst = str(link.get("dst", "")).lower()
@@ -499,13 +510,17 @@ class AnimatedTopologyCanvas(QWidget):
                 wire_id = f"{src}_{dst}_{idx}"
                 cap = float(link.get("capacity_mbps", 10.0))
 
-                if seg:
+                if seg or active_hop_pairs:
                     act_lower = self.active_path.lower()
-                    seg_lower = seg.lower()
-                    is_active = (act_lower == seg_lower or seg_lower in act_lower or 
-                                 (seg_lower == "path_a" and ("path-a" in act_lower or "primary" in act_lower)) or 
-                                 (seg_lower == "path_b" and ("path-b" in act_lower or "alternate" in act_lower)))
-                    load = self.path_loads.get(seg, self.path_a_load if seg == "path_a" else self.path_b_load)
+                    seg_lower = seg.lower() if seg else ""
+                    is_active = ((src, dst) in active_hop_pairs) or (
+                        bool(seg_lower) and (
+                            act_lower == seg_lower or seg_lower in act_lower or 
+                            (seg_lower == "path_a" and ("path-a" in act_lower or "primary" in act_lower)) or 
+                            (seg_lower == "path_b" and ("path-b" in act_lower or "alternate" in act_lower))
+                        )
+                    )
+                    load = self.path_loads.get(self.active_path if is_active else seg, self.path_a_load if seg == "path_a" else self.path_b_load)
                     is_alert = (is_active and self.is_congested)
                     is_eval = (is_active and getattr(self, "is_evaluating", False))
 
@@ -2855,6 +2870,14 @@ class MasterSDNGUI(QMainWindow):
         elif path_id == "path_b" and hasattr(self, "emulator"):
             self.emulator.link_path_b.set_capacity_mbps(float(val))
 
+        # Update controller path capacity and canvas topology definition
+        if hasattr(self, "controller") and self.controller:
+            self.controller.update_path_capacity(path_id, float(val))
+        if hasattr(self, "topo_canvas") and self.topo_canvas and self.topo_canvas.topo_def:
+            p_def = self.topo_canvas.topo_def.get_path(path_id)
+            if p_def:
+                p_def["capacity_mbps"] = float(val)
+
     def _on_cable_a_bw_changed(self, val):
         self._on_path_bw_changed("path_a", val)
 
@@ -2998,6 +3021,10 @@ class MasterSDNGUI(QMainWindow):
         self.lbl_val_jit.setText(f"{jit:.2f} ms")
         self.lbl_val_counts.setText(f"Recv: {recv:,} | Lost: {lost:,} | Total: {total_pkts:,}")
 
+        # Feed real-time packet loss and latency feedback to the SDN controller!
+        if hasattr(self, "controller") and self.controller:
+            self.controller.record_receiver_feedback(loss_pct=win_loss, latency_ms=lat)
+
         active_path = ctrl_status["active_path"]
         both_congested = bool(ctrl_status.get("all_paths_congested", ctrl_status.get("both_paths_congested")))
         is_evaluating = ctrl_status.get("is_evaluating", False)
@@ -3009,7 +3036,17 @@ class MasterSDNGUI(QMainWindow):
         path_loads = ctrl_status.get("path_loads", {})
         active_norm = "path_b" if ("path-b" in active_path.lower() or "alternate" in active_path.lower()) else ("path_a" if ("path-a" in active_path.lower() or "primary" in active_path.lower()) else active_path)
         active_load = path_loads.get(active_path, path_loads.get(active_norm, load_a if active_norm == "path_a" else load_b))
-        is_congested = (active_load >= self.controller.congestion_threshold_mbps)
+        
+        # Determine effective threshold from controller status or calculate
+        eff_thresh = ctrl_status.get("effective_threshold")
+        if eff_thresh is None:
+            active_cap = float(self.controller.paths.get(active_path, {}).get("capacity_mbps", 10.0)) if hasattr(self.controller, "paths") else 10.0
+            eff_thresh = min(self.controller.congestion_threshold_mbps, max(0.5, active_cap * 0.80))
+
+        loss_thresh = getattr(self.controller, "loss_threshold_pct", 3.0)
+        load_breach = (active_load >= eff_thresh)
+        loss_breach = (win_loss >= loss_thresh)
+        is_congested = load_breach or loss_breach
 
         status_key = f"{active_path}_{both_congested}_{is_evaluating}_{consecutive_breaches}"
         if status_key != self._last_active_path_status:
@@ -3018,12 +3055,13 @@ class MasterSDNGUI(QMainWindow):
                 self.lbl_active_path_status.setText("CRITICAL: ALL PATHS CONGESTED")
                 self.lbl_active_path_status.setStyleSheet("background: #f38ba8; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
             elif is_evaluating:
-                thresh = getattr(self.controller, 'congestion_threshold_mbps', 8.0)
+                p_disp = active_path.upper()
+                reason_str = f"Packet Loss {win_loss:.1f}% >= {loss_thresh:.1f}%" if loss_breach else f"{active_load:.1f}M >= {eff_thresh:.1f}M"
                 self.lbl_active_path_status.setText(
-                    f"⚠️ CONGESTION BREACH DETECTED: {active_load:.1f}M >= {thresh:.1f}M [Evaluating Persistence: {consecutive_breaches}/{triggers_required}]"
+                    f"⚠️ CONGESTION DETECTED on {p_disp} ({reason_str}) [Evaluating Persistence: {consecutive_breaches}/{triggers_required}]"
                 )
                 self.lbl_active_path_status.setStyleSheet("background: #fab387; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
-            elif active_path == PATH_PRIMARY:
+            elif active_path == PATH_PRIMARY or active_path == "path_a":
                 self.lbl_active_path_status.setText("ACTIVE PATH: Path-A (Primary)")
                 self.lbl_active_path_status.setStyleSheet("background: #a6e3a1; color: #11111b; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
             else:
@@ -3043,8 +3081,10 @@ class MasterSDNGUI(QMainWindow):
         # Update dynamic path status pills
         for p_id, pill in getattr(self, "path_status_pills", {}).items():
             p_load = path_loads.get(p_id, load_a if p_id == "path_a" else load_b)
+            p_cap = float(self.controller.paths.get(p_id, {}).get("capacity_mbps", 10.0)) if hasattr(self.controller, "paths") else 10.0
+            p_eff_thresh = min(self.controller.congestion_threshold_mbps, max(0.5, p_cap * 0.80))
             if p_id == active_path or p_id == active_norm:
-                is_p_cong = (p_load >= self.controller.congestion_threshold_mbps)
+                is_p_cong = (p_load >= p_eff_thresh) or (win_loss >= loss_thresh)
                 if is_p_cong and is_evaluating:
                     pill.setText(f"ACTIVE: {p_load:.1f}M [EVAL {consecutive_breaches}/{triggers_required}]")
                     pill.setStyleSheet("background-color: #fab387; color: #11111b; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px;")

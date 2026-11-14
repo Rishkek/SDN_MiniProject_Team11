@@ -207,12 +207,14 @@ class NetworkEmulator:
                 if self._running:
                     sim_link.start(forward_to_dest)
                 self.path_links[p_id] = sim_link
+                self.path_links[p_id.lower()] = sim_link
             else:
                 sim_link = self.path_links[p_id]
                 sim_link.name = name
                 sim_link.set_capacity_mbps(cap)
                 sim_link.set_delay_ms(delay)
                 sim_link.set_max_queue(q_lim)
+                self.path_links[p_id.lower()] = sim_link
 
         if "path_a" in self.path_links:
             self.link_path_a = self.path_links["path_a"]
@@ -356,7 +358,12 @@ class NetworkEmulator:
                 active_path_key = self.controller.current_active_path
                 active_link = self.path_links.get(active_path_key)
                 if not active_link:
-                    if "Path-B" in str(active_path_key) or active_path_key == "path_b":
+                    for k, lk in self.path_links.items():
+                        if k.lower() == str(active_path_key).lower():
+                            active_link = lk
+                            break
+                if not active_link:
+                    if self.controller._is_path_b(active_path_key):
                         active_link = self.link_path_b
                     else:
                         active_link = self.link_path_a

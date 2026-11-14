@@ -430,3 +430,48 @@ def test_m_json_topology_loader_and_topology_handler():
     handler.reset_defaults()
     assert handler.cables["cable_path_a"].capacity_mbps == 10.0
     assert handler.cables["cable_path_b"].capacity_mbps == 10.0
+
+
+# ---------------------------------------------------------------------------
+# Test M: Cascading Multi-Path Rerouting on Secondary Congestion & Loss
+# ---------------------------------------------------------------------------
+def test_m_cascading_multipath_rerouting_on_secondary_loss():
+    """Verify that when secondary path encounters packet loss, SDN controller cascades to Path C and D."""
+    from src.topology_loader import load_topology
+    topo = load_topology("topology_src/mesh.json")
+    ctrl = SDNController(congestion_threshold_mbps=8.0, poll_interval=0.1, adaptive_routing_enabled=True, triggers_required=1)
+    ctrl.set_available_paths(topo.paths)
+
+    # 1. Start on Path A
+    assert ctrl.current_active_path in ("path_a", PATH_PRIMARY, topo.paths["path_a"]["name"])
+
+    # 2. Congest Path A with load breach (12.0 Mbps)
+    port_a = ctrl.path_ports.get("path_a", 2)
+    ctrl.record_external_stats("s1", port_no=port_a, rx_bytes=0, tx_bytes=0)
+    time.sleep(0.12)
+    ctrl.record_external_stats("s1", port_no=port_a, rx_bytes=200000, tx_bytes=200000)
+    ctrl._poll_and_evaluate()
+
+    # Reroutes to Path B
+    assert ctrl._is_path_b(ctrl.current_active_path) or "path_b" in ctrl.current_active_path.lower()
+    assert ctrl.total_reroutes == 1
+
+    # 3. Path B encounters high packet loss (e.g. throttled or bottlenecked)
+    ctrl.update_path_capacity("path_b", 1.0)
+    ctrl.record_receiver_feedback(loss_pct=40.0)
+    time.sleep(0.12)
+    ctrl._poll_and_evaluate()
+
+    # Controller must NOT remain stuck on Path B; it must cascade to Path C!
+    assert ctrl.current_active_path == "path_c"
+    assert ctrl.total_reroutes == 2
+
+    # 4. If Path C also encounters congestion, cascade to Path D!
+    ctrl.update_path_capacity("path_c", 1.0)
+    ctrl.record_receiver_feedback(loss_pct=35.0)
+    time.sleep(0.12)
+    ctrl._poll_and_evaluate()
+
+    assert ctrl.current_active_path == "path_d"
+    assert ctrl.total_reroutes == 3
+    ctrl.stop()

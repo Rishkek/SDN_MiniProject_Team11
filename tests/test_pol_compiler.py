@@ -49,6 +49,22 @@ class TestNativePolCompiler:
         assert len(topo.links) == expected_links
         assert len(topo.paths) >= 1
 
+    def test_compile_stress_topology_uses_valid_path_ids(self, tmp_path):
+        pol_file = "pol_src/stress_test.pol"
+        out_json = str(tmp_path / "stress_test.json")
+
+        res = subprocess.run([POLC_BIN, pol_file, "-o", out_json], capture_output=True, text=True)
+        assert res.returncode == 0, f"Compilation failed: {res.stderr}"
+
+        topo = load_topology(out_json)
+        assert len(topo.switches) == 11
+        assert len(topo.hosts) == 4
+        assert len(topo.links) == 29
+        assert len(topo.paths) == 32
+        assert topo.paths["path_a"]["hops"] == ["s1", "s2"]
+        assert "path_27" in topo.paths
+        assert "path_32" in topo.paths
+
     def test_compile_all_flag(self, tmp_path):
         res = subprocess.run([POLC_BIN, "--all"], capture_output=True, text=True)
         assert res.returncode == 0
