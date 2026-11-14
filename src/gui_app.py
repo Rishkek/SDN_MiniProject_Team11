@@ -119,6 +119,7 @@ class AnimatedTopologyCanvas(QWidget):
         self.path_a_load = 0.0
         self.path_b_load = 0.0
         self.path_loads: Dict[str, float] = {}
+        self.path_queues: Dict[str, Tuple[int, int]] = {}
         self.is_congested = False
         self.is_evaluating = False
         self.consecutive_breaches = 0
@@ -300,12 +301,15 @@ class AnimatedTopologyCanvas(QWidget):
     def update_state(self, active_path: str, load_a: float, load_b: float, congested: bool,
                      q_occupancy: float, q_limit: int, main_active: bool, cross_active: bool,
                      path_loads: Optional[Dict[str, float]] = None,
-                     is_evaluating: bool = False, consecutive_breaches: int = 0, triggers_required: int = 3):
+                     is_evaluating: bool = False, consecutive_breaches: int = 0, triggers_required: int = 3,
+                     path_queues: Optional[Dict[str, Tuple[int, int]]] = None):
         self.active_path = active_path
         self.path_a_load = load_a
         self.path_b_load = load_b
         if path_loads:
             self.path_loads = dict(path_loads)
+        if path_queues:
+            self.path_queues = dict(path_queues)
         self.is_congested = congested
         self.is_evaluating = is_evaluating
         self.consecutive_breaches = consecutive_breaches
@@ -377,6 +381,29 @@ class AnimatedTopologyCanvas(QWidget):
             src_name = str(closest_wire.get("src", "")).upper()
             dst_name = str(closest_wire.get("dst", "")).upper()
 
+            seg = str(closest_wire.get("segment", "")).lower()
+            wire_q_cur = 0
+            wire_q_max = self.queue_limit
+
+            # Genuine per-wire queue occupancy
+            p_queues = getattr(self, "path_queues", {})
+            if seg and seg in p_queues:
+                wire_q_cur, wire_q_max = p_queues[seg]
+            elif seg and seg.replace("-", "_") in p_queues:
+                wire_q_cur, wire_q_max = p_queues[seg.replace("-", "_")]
+            elif closest_wire.get("is_active", False):
+                act_k = str(self.active_path).lower()
+                if act_k in p_queues:
+                    wire_q_cur, wire_q_max = p_queues[act_k]
+                elif act_k.replace("-", "_") in p_queues:
+                    wire_q_cur, wire_q_max = p_queues[act_k.replace("-", "_")]
+                else:
+                    wire_q_cur = int(self.queue_occupancy * self.queue_limit / 100)
+                    wire_q_max = self.queue_limit
+            elif closest_wire.get("is_alert", False):
+                if "path_a" in p_queues:
+                    wire_q_cur, wire_q_max = p_queues["path_a"]
+
             tooltip_html = (
                 f"<div style='background-color:#181825; color:#cdd6f4; border:1px solid #45475a; "
                 f"padding:8px; border-radius:6px; font-family: Segoe UI, sans-serif; font-size:11px;'>"
@@ -386,7 +413,7 @@ class AnimatedTopologyCanvas(QWidget):
                 f"<b>Status:</b> {status_html}<br/>"
                 f"<b>Current Flow Rate:</b> <span style='color:#fab387; font-weight:bold; font-size:13px;'>{flow_rate:.2f} Mbps</span><br/>"
                 f"<b>Cable Capacity:</b> {cap:.1f} Mbps (<b>Utilization:</b> {util:.1f}%)<br/>"
-                f"<b>Buffer Queue:</b> {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts"
+                f"<b>Buffer Queue:</b> {wire_q_cur}/{wire_q_max} pkts"
                 f"</div>"
             )
             QToolTip.showText(event.globalPosition().toPoint(), tooltip_html, self)
@@ -608,10 +635,10 @@ class AnimatedTopologyCanvas(QWidget):
             draw_link(pos_s1, pos_s3, color_b, thick_b, label_b, wire_meta=meta_b)
             draw_link(pos_s3, pos_s4, color_b, thick_b, wire_meta={"wire_id": "path_b_s3_s4", "src": "s3", "dst": "s4", "segment": "path_b", "load": self.path_b_load, "capacity": 10.0, "is_active": is_path_b_active, "is_alert": False, "is_evaluating": False})
 
-        # Dynamic Queue Meter on Path A
-        q_box_x = int(w * 0.36)
+        # Dynamic Queue Meter for Active Route
+        q_box_x = int(w * 0.34)
         q_box_y = int(h * 0.08)
-        q_box_w = min(130, int(w * 0.20))
+        q_box_w = min(170, int(w * 0.26))
         painter.setBrush(self._brush_q_bg)
         painter.setPen(self._pen_q_border)
         painter.drawRect(q_box_x, q_box_y, q_box_w, 14)
@@ -620,7 +647,7 @@ class AnimatedTopologyCanvas(QWidget):
         painter.fillRect(q_box_x, q_box_y, fill_w, 14, q_brush)
         painter.setPen(self._color_text_white)
         painter.setFont(self._font_bold_7)
-        painter.drawText(q_box_x + 6, q_box_y + 11, f"Queue: {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts")
+        painter.drawText(q_box_x + 6, q_box_y + 11, f"Queue ({self.active_path}): {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts")
 
         def draw_node(pos, text, subtext, bg_color, is_switch=False):
             rad = 20 if is_switch else 17
@@ -3117,9 +3144,16 @@ class MasterSDNGUI(QMainWindow):
             self.btn_inject_congestion.setText("⚡ Inject Congestion (Burst on Path A)")
             self.btn_inject_congestion.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold; padding: 7px;")
 
-        q_cur = self.emulator.link_path_a.packet_queue.qsize()
-        q_max = self.emulator.link_path_a.max_queue
+        # Genuine active route link queue stats
+        active_link = self.emulator.path_links.get(active_path)
+        if not active_link:
+            active_link = self.emulator.path_links.get(str(active_path).lower(), self.emulator.link_path_a)
+        q_cur = active_link.packet_queue.qsize()
+        q_max = active_link.max_queue
         q_pct = (q_cur / max(1, q_max)) * 100.0
+
+        # Query all link queue metrics for per-wire hover inspection
+        path_queues = self.emulator.get_link_queue_stats() if hasattr(self.emulator, "get_link_queue_stats") else {}
 
         is_main_active = bool(self.main_sender and self.main_sender._running)
         self.topo_canvas.update_state(
@@ -3128,7 +3162,8 @@ class MasterSDNGUI(QMainWindow):
             path_loads=path_loads,
             is_evaluating=is_evaluating,
             consecutive_breaches=consecutive_breaches,
-            triggers_required=triggers_required
+            triggers_required=triggers_required,
+            path_queues=path_queues
         )
 
         elapsed = time.time() - self.start_epoch

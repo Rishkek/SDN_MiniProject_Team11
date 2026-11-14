@@ -54,9 +54,9 @@ class SimulatedLink:
         self._lock = threading.Lock()
 
         # Precalculate rate-limiter constants
-        self._burst_depth_sec = 0.02  # 20ms burst allowance
+        self._burst_depth_sec = 0.05  # 50ms burst allowance
         self._bytes_per_sec = (self.capacity_mbps * 1_000_000.0) / 8.0
-        self._max_tokens = max(16384.0, self._bytes_per_sec * self._burst_depth_sec)
+        self._max_tokens = max(65536.0, self._bytes_per_sec * self._burst_depth_sec)
 
     def set_max_queue(self, new_limit: int):
         """Dynamically adjusts the queue buffer limit."""
@@ -68,7 +68,7 @@ class SimulatedLink:
         with self._lock:
             self.capacity_mbps = max(1.0, min(50.0, float(new_capacity)))
             self._bytes_per_sec = (self.capacity_mbps * 1_000_000.0) / 8.0
-            self._max_tokens = max(16384.0, self._bytes_per_sec * self._burst_depth_sec)
+            self._max_tokens = max(65536.0, self._bytes_per_sec * self._burst_depth_sec)
 
     def set_delay_ms(self, delay_ms: float):
         """Dynamically adjusts link propagation delay."""
@@ -107,12 +107,22 @@ class SimulatedLink:
 
     def _drain_loop(self):
         last_token_time = time.perf_counter()
-        tokens = max(16384.0, (self.capacity_mbps * 1_000_000.0 / 8.0) * self._burst_depth_sec)
+        with self._lock:
+            bps = (self.capacity_mbps * 1_000_000.0) / 8.0
+            max_tok = max(65536.0, bps * self._burst_depth_sec)
+            tokens = max_tok
 
         while self._running:
             try:
                 pkt_data, dest, enq_time = self.packet_queue.get(timeout=0.05)
             except queue.Empty:
+                now = time.perf_counter()
+                elapsed = now - last_token_time
+                last_token_time = now
+                with self._lock:
+                    bps = (self.capacity_mbps * 1_000_000.0) / 8.0
+                    max_tok = max(65536.0, bps * self._burst_depth_sec)
+                tokens = min(max_tok, tokens + elapsed * bps)
                 continue
 
             pkt_len = len(pkt_data)
@@ -123,24 +133,24 @@ class SimulatedLink:
             if wait_for_flight > 0.001:
                 time.sleep(wait_for_flight)
 
-            # 2. Token-bucket bandwidth limiter (dynamically computed for immediate slider responsiveness)
+            # 2. Token-bucket bandwidth limiter with credit/debt smoothing
             with self._lock:
                 bps = (self.capacity_mbps * 1_000_000.0) / 8.0
-                max_tok = max(16384.0, bps * self._burst_depth_sec)
+                max_tok = max(65536.0, bps * self._burst_depth_sec)
 
             now = time.perf_counter()
             delta = now - last_token_time
             last_token_time = now
-            tokens = min(max_tok, tokens + delta * bps)
+            tokens = min(max_tok, tokens + delta * bps) - pkt_len
 
-            if tokens < pkt_len:
-                needed = (pkt_len - tokens) / bps
-                if needed > 0.0005:
-                    time.sleep(needed)
-                tokens = 0.0
-                last_token_time = time.perf_counter()
-            else:
-                tokens -= pkt_len
+            if tokens < 0:
+                deficit_sec = -tokens / bps
+                # Accumulate micro-debt; only sleep when debt exceeds OS scheduling quantum (3ms)
+                if deficit_sec >= 0.003:
+                    time.sleep(deficit_sec)
+                    wake_now = time.perf_counter()
+                    tokens += (wake_now - now) * bps
+                    last_token_time = wake_now
 
             self.tx_bytes += pkt_len
 
@@ -223,6 +233,13 @@ class NetworkEmulator:
             self.link_path_b = self.path_links["path_b"]
             self.path_links[PATH_ALTERNATE] = self.link_path_b
 
+    def get_link_queue_stats(self) -> Dict[str, Tuple[int, int]]:
+        """Returns mapping of path_id -> (queue_size, max_queue) for all links."""
+        stats = {}
+        for p_id, link in self.path_links.items():
+            stats[p_id.lower()] = (link.packet_queue.qsize(), link.max_queue)
+        return stats
+
     def register_packet_callback(self, cb):
         """Registers a callback function to receive packet transmission events."""
         if cb not in self.packet_callbacks:
@@ -236,9 +253,17 @@ class NetworkEmulator:
     def start(self):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+        except OSError:
+            pass
         self._sock.bind(("127.0.0.1", self.ingress_port))
 
         self._out_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            self._out_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
+        except OSError:
+            pass
 
         try:
             self._monitor_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -310,11 +335,13 @@ class NetworkEmulator:
                 pass
 
         if self._monitor_sock:
-            try:
-                line = f"[{now_str}] [{flow_name} #{seq:>5}] {path_name:>6} | Q:{q_cur:>2}/{q_max} | {status}"
-                self._monitor_sock.sendto(line.encode(), ("127.0.0.1", TELEMETRY_MONITOR_PORT))
-            except OSError:
-                pass
+            # Only send telemetry monitor events for anomalies (drops, reroutes) or sampled stream (every 40 pkts) to avoid GIL/socket overhead
+            if (not is_forwarded) or (flow_id == FLOW_MAIN and active_link != self.link_path_a) or (seq % 40 == 0):
+                try:
+                    line = f"[{now_str}] [{flow_name} #{seq:>5}] {path_name:>6} | Q:{q_cur:>2}/{q_max} | {status}"
+                    self._monitor_sock.sendto(line.encode(), ("127.0.0.1", TELEMETRY_MONITOR_PORT))
+                except OSError:
+                    pass
 
     def _switch_relay_loop(self):
         self._sock.settimeout(0.3)
