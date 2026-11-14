@@ -344,20 +344,38 @@ class SDNController:
                         self.all_paths_congested = False
 
                         # Auto-reroute to the BEST path according to configured policy
+                        # Prefer paths that use disjoint physical cables from ingress over paths sharing the congested cable
+                        active_hops = self.paths.get(active_path, {}).get("hops", [])
+                        active_fh = str(active_hops[1]).lower() if len(active_hops) > 1 else ""
+
+                        def shares_congested_cable(p_name: str) -> int:
+                            p_hops = self.paths.get(p_name, {}).get("hops", [])
+                            p_fh = str(p_hops[1]).lower() if len(p_hops) > 1 else ""
+                            return 1 if (active_fh and p_fh == active_fh) else 0
+
                         if self.reroute_policy == "shortest_hop":
                             best_path = min(
                                 viable_paths,
-                                key=lambda p: (len(self.paths[p].get("hops", [])), self.path_loads.get(p, 0.0))
+                                key=lambda p: (
+                                    shares_congested_cable(p),
+                                    len(self.paths[p].get("hops", [])),
+                                    self.path_loads.get(p, 0.0)
+                                )
                             )
                         elif self.reroute_policy == "max_headroom":
                             best_path = max(
                                 viable_paths,
-                                key=lambda p: (float(self.paths[p].get("capacity_mbps", 10.0)) - self.path_loads.get(p, 0.0), -len(self.paths[p].get("hops", [])))
+                                key=lambda p: (
+                                    -shares_congested_cable(p),
+                                    float(self.paths[p].get("capacity_mbps", 10.0)) - self.path_loads.get(p, 0.0),
+                                    -len(self.paths[p].get("hops", []))
+                                )
                             )
-                        else:  # 'least_loaded' default: lowest utilization (load/cap), then shortest hop
+                        else:  # 'least_loaded' default: disjoint cable first, lowest utilization (load/cap), then shortest hop
                             best_path = min(
                                 viable_paths,
                                 key=lambda p: (
+                                    shares_congested_cable(p),
                                     self.path_loads.get(p, 0.0) / max(0.1, float(self.paths[p].get("capacity_mbps", 10.0))),
                                     len(self.paths[p].get("hops", []))
                                 )

@@ -1018,26 +1018,28 @@ static int find_or_add_node(Topology *topo, const char *alias, ParseResult *res,
 static void find_simple_paths_dfs(
     int curr, int target, int visited[], int path[], int len,
     int all_paths[MAX_PATHS][MAX_HOPS], int path_lens[MAX_PATHS], int *total_found,
-    int sw_count, int adj[MAX_NODES][MAX_NODES]
+    int sw_count, int adj[MAX_NODES][MAX_NODES], int target_depth
 ) {
     if (*total_found >= MAX_PATHS) return;
+    if (len > target_depth) return;
     visited[curr] = 1;
     path[len++] = curr;
 
     if (curr == target) {
-        if (len >= 2) {
+        if (len == target_depth && len >= 2) {
             for (int i = 0; i < len; i++) {
                 all_paths[*total_found][i] = path[i];
             }
             path_lens[*total_found] = len;
             (*total_found)++;
         }
-    } else {
+    } else if (len < target_depth) {
         for (int next = 0; next < sw_count; next++) {
             if (adj[curr][next] && !visited[next]) {
                 find_simple_paths_dfs(next, target, visited, path, len,
                                       all_paths, path_lens, total_found,
-                                      sw_count, adj);
+                                      sw_count, adj, target_depth);
+                if (*total_found >= MAX_PATHS) break;
             }
         }
     }
@@ -1106,31 +1108,72 @@ static void synthesize_paths(Topology *topo) {
 
     if (start_sw < 0 || end_sw < 0 || start_sw == end_sw) return;
 
-    // DFS to discover ALL simple loop-free paths between Ingress and Egress
-    int visited[MAX_NODES] = {0};
-    int cur_path[MAX_HOPS];
     int all_paths[MAX_PATHS][MAX_HOPS];
     int path_lens[MAX_PATHS] = {0};
     int total_found = 0;
 
-    find_simple_paths_dfs(start_sw, end_sw, visited, cur_path, 0,
-                          all_paths, path_lens, &total_found,
-                          sw_count, adj);
+    // Direct path (start_sw -> end_sw) is primary if direct link exists
+    if (adj[start_sw][end_sw]) {
+        all_paths[0][0] = start_sw;
+        all_paths[0][1] = end_sw;
+        path_lens[0] = 2;
+        total_found = 1;
+    }
 
-    // Sort paths by hop length ascending (shortest hop path is primary)
-    for (int i = 0; i < total_found - 1; i++) {
-        for (int j = i + 1; j < total_found; j++) {
-            if (path_lens[j] < path_lens[i]) {
-                int tmp_l = path_lens[i];
-                path_lens[i] = path_lens[j];
-                path_lens[j] = tmp_l;
-                for (int h = 0; h < MAX_HOPS; h++) {
-                    int tmp_h = all_paths[i][h];
-                    all_paths[i][h] = all_paths[j][h];
-                    all_paths[j][h] = tmp_h;
+    // Identify all intermediate neighbor switches connected to Ingress
+    int first_hops[MAX_NODES];
+    int fh_count = 0;
+    for (int i = 0; i < sw_count; i++) {
+        if (adj[start_sw][i] && i != end_sw) {
+            first_hops[fh_count++] = i;
+        }
+    }
+
+    // Allocate storage for discovered paths per first-hop cable
+    typedef int PathHops[MAX_HOPS];
+    PathHops (*fh_paths_all)[MAX_PATHS] = (PathHops (*)[MAX_PATHS])calloc(MAX_NODES, sizeof(*fh_paths_all));
+    int (*fh_lens_all)[MAX_PATHS] = (int (*)[MAX_PATHS])calloc(MAX_NODES, sizeof(*fh_lens_all));
+    int fh_found_per_hop[MAX_NODES] = {0};
+
+    if (fh_paths_all && fh_lens_all) {
+        // Search simple paths through each first-hop neighbor using Iterative Deepening DFS
+        for (int f = 0; f < fh_count; f++) {
+            int next_sw = first_hops[f];
+            int found = 0;
+            for (int d = 2; d <= MAX_HOPS && found < MAX_PATHS; d++) {
+                int visited[MAX_NODES] = {0};
+                visited[start_sw] = 1;
+                int cur_path[MAX_HOPS];
+                cur_path[0] = start_sw;
+                find_simple_paths_dfs(next_sw, end_sw, visited, cur_path, 1,
+                                      fh_paths_all[f], fh_lens_all[f], &found,
+                                      sw_count, adj, d);
+            }
+            fh_found_per_hop[f] = found;
+        }
+
+        // Round-robin interleave across all unique first-hop cables to guarantee physical cable diversity
+        int round = 0;
+        while (total_found < MAX_PATHS) {
+            int added = 0;
+            for (int f = 0; f < fh_count; f++) {
+                if (round < fh_found_per_hop[f]) {
+                    int plen = fh_lens_all[f][round];
+                    path_lens[total_found] = plen;
+                    for (int h = 0; h < plen; h++) {
+                        all_paths[total_found][h] = fh_paths_all[f][round][h];
+                    }
+                    total_found++;
+                    added = 1;
+                    if (total_found >= MAX_PATHS) break;
                 }
             }
+            if (!added) break;
+            round++;
         }
+
+        free(fh_paths_all);
+        free(fh_lens_all);
     }
 
     // Register all discovered unique paths

@@ -3330,7 +3330,18 @@ class MasterSDNGUI(QMainWindow):
         alternates = [p for p in paths if p != curr]
         if not alternates:
             return
-        best = min(alternates, key=lambda p: (self.controller.path_loads.get(p, 0.0), len(self.controller.paths[p].get("hops", []))))
+        curr_hops = self.controller.paths.get(curr, {}).get("hops", [])
+        curr_fh = str(curr_hops[1]).lower() if len(curr_hops) > 1 else ""
+
+        def alt_key(p):
+            p_hops = self.controller.paths.get(p, {}).get("hops", [])
+            p_fh = str(p_hops[1]).lower() if len(p_hops) > 1 else ""
+            shares = 1 if (curr_fh and p_fh == curr_fh) else 0
+            load = self.controller.path_loads.get(p, 0.0)
+            cap = float(self.controller.paths.get(p, {}).get("capacity_mbps", 10.0))
+            return (shares, load / max(0.1, cap), len(p_hops))
+
+        best = min(alternates, key=alt_key)
         self._manual_reroute(best)
 
     def _on_path_bw_changed(self, path_id: str, val: int):

@@ -114,11 +114,40 @@ def discover_all_simple_paths(
 
     dfs(ingress_id, egress_id, [ingress_id])
 
-    # Sort shortest hops first
-    all_paths.sort(key=len)
+    # Direct paths (shortest possible direct link between ingress and egress)
+    direct_paths = [p for p in all_paths if len(p) == 2 or (len(p) > 1 and p[1] == egress_id)]
+    indirect_paths = [p for p in all_paths if p not in direct_paths]
+
+    # Group indirect paths by the outgoing switch cable leaving ingress
+    from collections import defaultdict
+    by_first_hop = defaultdict(list)
+    for p in indirect_paths:
+        first_hop = p[1]
+        by_first_hop[first_hop].append(p)
+
+    # Sort each group by length ascending so cleaner, shorter paths come first
+    for fh in by_first_hop:
+        by_first_hop[fh].sort(key=len)
+
+    # Round-robin interleave across all unique first-hop cables to guarantee physical cable diversity
+    ordered_paths = list(direct_paths)
+    round_idx = 0
+    first_hop_keys = sorted(by_first_hop.keys())
+    while len(ordered_paths) < 32:
+        added_any = False
+        for fh in first_hop_keys:
+            group = by_first_hop[fh]
+            if round_idx < len(group):
+                ordered_paths.append(group[round_idx])
+                added_any = True
+                if len(ordered_paths) >= 32:
+                    break
+        if not added_any:
+            break
+        round_idx += 1
 
     paths_dict: Dict[str, Any] = {}
-    for idx, hops in enumerate(all_paths):
+    for idx, hops in enumerate(ordered_paths):
         p_id = f"path_{chr(ord('a') + idx)}" if idx < 26 else f"path_{idx + 1}"
         p_label = f"Path-{chr(ord('A') + idx)}" if idx < 26 else f"Path-{idx + 1}"
         role = "primary" if idx == 0 else ("alternate" if idx == 1 else "backup")
@@ -161,10 +190,37 @@ class TopologyDefinition:
         self.traffic_profile: Dict[str, Any] = data.get("traffic_profile", {})
         self.sdn_policy: Dict[str, Any] = data.get("sdn_policy", {})
 
-        # Dynamic path discovery if paths are missing or incomplete
+        # Dynamic path discovery if paths are missing, incomplete, or lack cable diversity
+        needs_discovery = False
         if not self.paths or len(self.paths) < 2:
+            needs_discovery = True
+        else:
+            # Check if ingress switch has multiple outgoing cables, but loaded paths ignore them
+            ingress_id = self.get_ingress_id()
+            if ingress_id:
+                sw_ids = {str(s.get("id", "")).lower() for s in self.switches if s.get("id")}
+                ingress_neighbors = set()
+                for lk in self.links:
+                    u = str(lk.get("src", "")).lower()
+                    v = str(lk.get("dst", "")).lower()
+                    if u == ingress_id and v in sw_ids:
+                        ingress_neighbors.add(v)
+                    elif v == ingress_id and u in sw_ids:
+                        ingress_neighbors.add(u)
+
+                path_first_hops = set()
+                for p_info in self.paths.values():
+                    hops = p_info.get("hops", [])
+                    if len(hops) > 1:
+                        path_first_hops.add(str(hops[1]).lower())
+
+                # If ingress connects to 3+ switches, but loaded paths only cover <= 2 of them, rediscover
+                if len(ingress_neighbors) > len(path_first_hops) and len(ingress_neighbors) >= 3:
+                    needs_discovery = True
+
+        if needs_discovery:
             discovered = discover_all_simple_paths(self.switches, self.hosts, self.links)
-            if len(discovered) > len(self.paths):
+            if discovered and len(discovered) >= len(self.paths):
                 self.paths = discovered
 
         # Tag links with path segments if missing
@@ -190,6 +246,34 @@ class TopologyDefinition:
             h_id = h.get("id", "").lower()
             if h_id:
                 self._node_map[h_id] = h
+
+    def get_ingress_id(self) -> Optional[str]:
+        """Finds ID of ingress switch from switch roles, connected senders, or fallback."""
+        for s in self.switches:
+            if str(s.get("role", "")).lower() == "ingress":
+                return str(s.get("id", "")).lower()
+        for lk in self.links:
+            src = str(lk.get("src", "")).lower()
+            dst = str(lk.get("dst", "")).lower()
+            if src in ("h1", "sender"):
+                return dst
+        if self.switches:
+            return str(self.switches[0].get("id", "")).lower()
+        return None
+
+    def get_egress_id(self) -> Optional[str]:
+        """Finds ID of egress switch from switch roles, connected receivers, or fallback."""
+        for s in self.switches:
+            if str(s.get("role", "")).lower() == "egress":
+                return str(s.get("id", "")).lower()
+        for lk in self.links:
+            src = str(lk.get("src", "")).lower()
+            dst = str(lk.get("dst", "")).lower()
+            if dst in ("h2", "receiver", "reciever"):
+                return src
+        if self.switches:
+            return str(self.switches[-1].get("id", "")).lower()
+        return None
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves node configuration dictionary by ID (e.g. 's1', 'h1')."""

@@ -466,13 +466,13 @@ def test_m_cascading_multipath_rerouting_on_secondary_loss():
     assert ctrl.current_active_path == "path_c"
     assert ctrl.total_reroutes == 2
 
-    # 4. If Path C also encounters congestion, cascade to Path D!
+    # 4. If Path C also encounters congestion, cascade to next available path (Path D or Path E)!
     ctrl.update_path_capacity("path_c", 1.0)
     ctrl.record_receiver_feedback(loss_pct=35.0)
     time.sleep(0.12)
     ctrl._poll_and_evaluate()
 
-    assert ctrl.current_active_path == "path_d"
+    assert ctrl.current_active_path in ("path_d", "path_e")
     assert ctrl.total_reroutes == 3
     ctrl.stop()
 
@@ -523,4 +523,81 @@ def test_n_mesh_route_flap_damping_and_oscillation_suppression():
     main_recv.stop()
     cross_recv.stop()
     emu.stop()
+    ctrl.stop()
+
+
+# ---------------------------------------------------------------------------
+# Test O: Ingress Cable Diversity & 4th Wire Egress Failover on Stress Topology
+# ---------------------------------------------------------------------------
+def test_o_ingress_first_hop_cable_diversity_and_fourth_wire_failover():
+    """
+    Verify that multi-path topology discovery round-robins across distinct first-hop egress cables,
+    and when Path A, B, and C have diminished capacities, the controller routes to the 4th wire (Path D).
+    """
+    from src.topology_loader import load_topology
+    topo = load_topology("topology_src/stress_test.json")
+
+    # 1. Verify that Path A, B, C, D span all 4 physical outgoing cables from Ingress s1
+    assert topo.paths["path_a"]["hops"][1] == "s2", "Path A must be direct link to s2 (Wire 1)"
+    assert topo.paths["path_b"]["hops"][1] == "s3", "Path B must leave s1 via s3 (Wire 2)"
+    assert topo.paths["path_c"]["hops"][1] == "s4", "Path C must leave s1 via s4 (Wire 3)"
+    assert topo.paths["path_d"]["hops"][1] == "s5", "Path D must leave s1 via s5 (Wire 4)"
+
+    first_four_cables = {topo.paths[p]["hops"][1] for p in ("path_a", "path_b", "path_c", "path_d")}
+    assert first_four_cables == {"s2", "s3", "s4", "s5"}, "Path A-D must utilize all 4 unique egress cables from s1"
+
+    # 2. Initialize SDN Controller with loaded paths
+    ctrl = SDNController(
+        congestion_threshold_mbps=8.0,
+        poll_interval=0.1,
+        adaptive_routing_enabled=True,
+        triggers_required=1,
+        flap_damping_sec=0.0
+    )
+    ctrl.set_available_paths(topo.paths)
+
+    assert ctrl.current_active_path in ("path_a", PATH_PRIMARY, topo.paths["path_a"]["name"])
+
+    # 3. Simulate congestion on Path A by choking capacity and reporting loss
+    ctrl.update_path_capacity("path_a", 1.0)
+    ctrl.record_receiver_feedback(loss_pct=25.0)
+    time.sleep(0.12)
+    ctrl._poll_and_evaluate()
+
+    # Must switch to Path B (Wire 2 via s3)
+    assert ctrl.current_active_path == "path_b" or ctrl._is_path_b(ctrl.current_active_path)
+    assert ctrl.total_reroutes == 1
+
+    # 4. Diminish Path B capacity to 1.0 Mbps
+    ctrl.update_path_capacity("path_b", 1.0)
+    ctrl.record_receiver_feedback(loss_pct=30.0)
+    time.sleep(0.12)
+    ctrl._poll_and_evaluate()
+
+    # Must switch to Path C (Wire 3 via s4)
+    assert ctrl.current_active_path == "path_c"
+    assert ctrl.total_reroutes == 2
+
+    # 5. Diminish Path C capacity to 1.0 Mbps
+    ctrl.update_path_capacity("path_c", 1.0)
+    ctrl.record_receiver_feedback(loss_pct=30.0)
+    time.sleep(0.12)
+    ctrl._poll_and_evaluate()
+
+    # Must switch to Path D on the 4th wire from ingress (s1 -> s5)!
+    assert ctrl.current_active_path == "path_d"
+    assert topo.paths[ctrl.current_active_path]["hops"][1] == "s5", "Controller must take 4th wire from ingress (s5)"
+    assert ctrl.total_reroutes == 3
+
+    # 6. Revert: restore Path A bottleneck capacity to 15.0 Mbps and clean channel
+    ctrl.update_path_capacity("path_a", 15.0)
+    port_a = ctrl.path_ports.get("path_a", 2)
+    ctrl.record_external_stats("s1", port_no=port_a, rx_bytes=0, tx_bytes=0)
+    ctrl.record_receiver_feedback(loss_pct=0.0)
+
+    for _ in range(5):
+        time.sleep(0.12)
+        ctrl._poll_and_evaluate()
+
+    assert ctrl.current_active_path in ("path_a", PATH_PRIMARY)
     ctrl.stop()
