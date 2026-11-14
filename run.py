@@ -20,6 +20,33 @@ import argparse
 import platform
 import subprocess
 
+def boost_process_priority():
+    """Allocates maximum CPU scheduling priority, core affinity, and render optimizations."""
+    if sys.platform.startswith("linux"):
+        for nice_val in (-10, -5, -2):
+            try:
+                os.nice(nice_val)
+                break
+            except (OSError, PermissionError):
+                pass
+        try:
+            if hasattr(os, "sched_setaffinity"):
+                os.sched_setaffinity(0, set(range(os.cpu_count() or 1)))
+        except Exception:
+            pass
+        os.environ.setdefault("QSG_RENDER_LOOP", "basic")
+        os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+    elif sys.platform.startswith("win"):
+        try:
+            import ctypes
+            # HIGH_PRIORITY_CLASS = 0x00000080
+            ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00000080)
+        except Exception:
+            pass
+
+# Apply performance boost immediately upon execution
+boost_process_priority()
+
 # In Linux / WSL environments, configure Qt platform plugin to eliminate 'wayland' plugin warning
 if sys.platform.startswith("linux"):
     if "QT_QPA_PLATFORM" not in os.environ:
