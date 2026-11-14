@@ -55,6 +55,7 @@ if sys.platform.startswith("linux"):
         elif not os.environ.get("WAYLAND_DISPLAY"):
             os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.*=false")
+    os.environ.setdefault("QT_STYLE_OVERRIDE", "Fusion")
 
 # Add project root to sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

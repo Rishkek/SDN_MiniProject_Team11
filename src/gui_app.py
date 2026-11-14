@@ -52,8 +52,8 @@ from PyQt6.QtWidgets import (
     QSplitter, QScrollArea, QSizePolicy, QToolBar, QMenuBar, QMenu,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog, QToolTip
 )
-from PyQt6.QtCore import Qt, QTimer, QPointF, pyqtSignal, QThread
-from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QAction, QTextCursor, QMouseEvent
+from PyQt6.QtCore import Qt, QTimer, QPoint, QPointF, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QAction, QTextCursor, QMouseEvent, QPalette
 
 import matplotlib
 matplotlib.use("QtAgg")
@@ -164,11 +164,84 @@ class AnimatedTopologyCanvas(QWidget):
         self._dot_color_main = QColor("#89b4fa")
         self._dot_color_cross = QColor("#f38ba8")
 
+        # Zoom and Pan Interactive Viewport State
+        self.zoom_level: float = 1.0
+        self.pan_x: float = 0.0
+        self.pan_y: float = 0.0
+        self._is_panning: bool = False
+        self._pan_start: Optional[QPoint] = None
+        self._has_panned: bool = False
+
+        # Planar Auto-Arrange DAG / Flow Layout State
+        self.use_auto_layout: bool = True
+        self._auto_layout_positions: Dict[str, Tuple[float, float]] = {}
+
         # Load default diamond.json topology
         try:
             self.topo_def = get_default_topology()
         except Exception:
             self.topo_def = None
+
+        if self.topo_def:
+            self.auto_arrange_topology()
+
+        # HUD Control Buttons (Top Toolbar)
+        self.btn_auto_arrange = QPushButton("✨ Auto-Arrange: ON", self)
+        self.btn_auto_arrange.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_auto_arrange.setToolTip("Auto-arrange network topology into an optimal, crossing-free layered flow (Click to toggle)")
+        self.btn_auto_arrange.setStyleSheet("""
+            QPushButton {
+                background-color: #89b4fa;
+                color: #11111b;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 11px;
+                font-weight: bold;
+                border: 1px solid #b4befe;
+                border-radius: 4px;
+                padding: 3px 8px;
+            }
+            QPushButton:hover { background-color: #b4befe; }
+        """)
+        self.btn_auto_arrange.clicked.connect(self.toggle_auto_arrange)
+
+        hud_btn_style = """
+            QPushButton {
+                background-color: #313244;
+                color: #cdd6f4;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 11px;
+                font-weight: bold;
+                border: 1px solid #45475a;
+                border-radius: 4px;
+                padding: 2px 6px;
+            }
+            QPushButton:hover {
+                background-color: #45475a;
+                color: #89b4fa;
+                border: 1px solid #89b4fa;
+            }
+            QPushButton:pressed {
+                background-color: #585b70;
+            }
+        """
+
+        self.btn_zoom_in = QPushButton("➕", self)
+        self.btn_zoom_in.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_zoom_in.setToolTip("Zoom In (+15%) [or Scroll Wheel Up]")
+        self.btn_zoom_in.setStyleSheet(hud_btn_style)
+        self.btn_zoom_in.clicked.connect(lambda: self.zoom_in(1.15))
+
+        self.btn_zoom_out = QPushButton("➖", self)
+        self.btn_zoom_out.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_zoom_out.setToolTip("Zoom Out (-15%) [or Scroll Wheel Down]")
+        self.btn_zoom_out.setStyleSheet(hud_btn_style)
+        self.btn_zoom_out.clicked.connect(lambda: self.zoom_out(1.15))
+
+        self.btn_reset_zoom = QPushButton("⟲ 100%", self)
+        self.btn_reset_zoom.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_reset_zoom.setToolTip("Reset Zoom to 100% and Center [or Double Click Canvas]")
+        self.btn_reset_zoom.setStyleSheet(hud_btn_style)
+        self.btn_reset_zoom.clicked.connect(self.reset_view)
 
         # Top-Right (+load topology) button for JSON (.json) file loading
         self.btn_load_topo = QPushButton("(+load topology)", self)
@@ -198,10 +271,34 @@ class AnimatedTopologyCanvas(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        margin = 10
+        btn_h = 24
+
+        cur_x = margin
+        if hasattr(self, "btn_auto_arrange"):
+            w_auto = self.btn_auto_arrange.sizeHint().width() + 10
+            self.btn_auto_arrange.setGeometry(cur_x, margin, w_auto, btn_h)
+            self.btn_auto_arrange.raise_()
+            cur_x += w_auto + 6
+
+        if hasattr(self, "btn_zoom_in"):
+            self.btn_zoom_in.setGeometry(cur_x, margin, 26, btn_h)
+            self.btn_zoom_in.raise_()
+            cur_x += 26 + 4
+
+        if hasattr(self, "btn_zoom_out"):
+            self.btn_zoom_out.setGeometry(cur_x, margin, 26, btn_h)
+            self.btn_zoom_out.raise_()
+            cur_x += 26 + 4
+
+        if hasattr(self, "btn_reset_zoom"):
+            w_rst = max(55, self.btn_reset_zoom.sizeHint().width() + 8)
+            self.btn_reset_zoom.setGeometry(cur_x, margin, w_rst, btn_h)
+            self.btn_reset_zoom.raise_()
+
         if hasattr(self, "btn_load_topo"):
             btn_w = self.btn_load_topo.sizeHint().width() + 10
-            btn_h = self.btn_load_topo.sizeHint().height() + 2
-            self.btn_load_topo.setGeometry(self.width() - btn_w - 12, 10, btn_w, btn_h)
+            self.btn_load_topo.setGeometry(self.width() - btn_w - margin, margin, btn_w, btn_h)
             self.btn_load_topo.raise_()
 
     def _open_topology_file_dialog(self):
@@ -291,9 +388,278 @@ class AnimatedTopologyCanvas(QWidget):
                 f"Failed to load topology from {os.path.basename(filepath)}:\n{e}"
             )
 
+    def to_screen_coords(self, px: float, py: float, w: int, h: int) -> Tuple[int, int]:
+        """Maps normalized (px, py) in [0.0, 1.0] to canvas pixel space under active zoom & pan."""
+        cx = w / 2.0
+        cy = h / 2.0
+        base_x = w * px
+        base_y = h * py
+        sx = cx + (base_x - cx) * self.zoom_level + self.pan_x
+        sy = cy + (base_y - cy) * self.zoom_level + self.pan_y
+        return int(round(sx)), int(round(sy))
+
+    def from_screen_coords(self, sx: float, sy: float, w: int, h: int) -> Tuple[float, float]:
+        """Inverse transformation: screen pixels back to normalized [0.0, 1.0] coordinates."""
+        cx = w / 2.0
+        cy = h / 2.0
+        base_x = cx + (sx - cx - self.pan_x) / max(0.1, self.zoom_level)
+        base_y = cy + (sy - cy - self.pan_y) / max(0.1, self.zoom_level)
+        return max(0.0, min(1.0, base_x / max(1.0, w))), max(0.0, min(1.0, base_y / max(1.0, h)))
+
+    def zoom_in(self, factor: float = 1.15, center_pt: Optional[QPoint] = None):
+        """Zooms into viewport by factor (centered on cursor or viewport middle)."""
+        self.set_zoom(self.zoom_level * factor, center_pt)
+
+    def zoom_out(self, factor: float = 1.15, center_pt: Optional[QPoint] = None):
+        """Zooms out of viewport by factor."""
+        self.set_zoom(self.zoom_level / factor, center_pt)
+
+    def reset_view(self):
+        """Resets zoom to 100% and centers viewport."""
+        self.zoom_level = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        if hasattr(self, "btn_reset_zoom"):
+            self.btn_reset_zoom.setText("⟲ 100%")
+        self.update()
+
+    def set_zoom(self, new_zoom: float, focal_pt: Optional[QPoint] = None):
+        """Applies clamped zoom level [0.35x to 3.5x] invariant around focal point."""
+        clamped = max(0.35, min(3.5, float(new_zoom)))
+        if focal_pt is not None:
+            w = max(360, self.width())
+            h = max(240, self.height())
+            cx = w / 2.0
+            cy = h / 2.0
+            fx = float(focal_pt.x())
+            fy = float(focal_pt.y())
+            ratio = clamped / max(0.01, self.zoom_level)
+            self.pan_x = fx - cx - (fx - cx - self.pan_x) * ratio
+            self.pan_y = fy - cy - (fy - cy - self.pan_y) * ratio
+        self.zoom_level = clamped
+        if hasattr(self, "btn_reset_zoom"):
+            pct = int(round(self.zoom_level * 100))
+            self.btn_reset_zoom.setText(f"⟲ {pct}%")
+        self.update()
+
+    def toggle_auto_arrange(self):
+        """Toggles between auto-arranged planar DAG layout and raw file coordinates."""
+        self.use_auto_layout = not getattr(self, "use_auto_layout", True)
+        if self.use_auto_layout:
+            self.auto_arrange_topology()
+            if hasattr(self, "btn_auto_arrange"):
+                self.btn_auto_arrange.setText("✨ Auto-Arrange: ON")
+                self.btn_auto_arrange.setStyleSheet("""
+                    QPushButton {
+                        background-color: #89b4fa;
+                        color: #11111b;
+                        font-family: 'Segoe UI', sans-serif;
+                        font-size: 11px;
+                        font-weight: bold;
+                        border: 1px solid #b4befe;
+                        border-radius: 4px;
+                        padding: 3px 8px;
+                    }
+                    QPushButton:hover { background-color: #b4befe; }
+                """)
+        else:
+            if hasattr(self, "btn_auto_arrange"):
+                self.btn_auto_arrange.setText("✨ Auto-Arrange: OFF")
+                self.btn_auto_arrange.setStyleSheet("""
+                    QPushButton {
+                        background-color: #313244;
+                        color: #a6adc8;
+                        font-family: 'Segoe UI', sans-serif;
+                        font-size: 11px;
+                        font-weight: bold;
+                        border: 1px solid #45475a;
+                        border-radius: 4px;
+                        padding: 3px 8px;
+                    }
+                    QPushButton:hover { background-color: #45475a; color: #cdd6f4; }
+                """)
+        self.update()
+
+    def auto_arrange_topology(self):
+        """
+        Computes an optimal, planar layered DAG/flow layout.
+        Organizes nodes cleanly from Left to Right:
+        [Senders / Ingress Hosts] ➔ [Ingress Switch] ➔ [Intermediate Paths] ➔ [Egress Switch] ➔ [Receivers]
+        Eliminates crossed wires and guarantees proportional spacing.
+        """
+        self._auto_layout_positions.clear()
+
+        switches = self.topo_def.switches if self.topo_def else []
+        hosts = self.topo_def.hosts if self.topo_def else []
+        links = self.topo_def.links if self.topo_def else []
+
+        if not switches and not hosts:
+            self._auto_layout_positions = {
+                "h1": (0.08, 0.28), "h3": (0.08, 0.72),
+                "s1": (0.26, 0.50), "s2": (0.50, 0.22),
+                "s3": (0.50, 0.78), "s4": (0.74, 0.50),
+                "h2": (0.92, 0.28), "h4": (0.92, 0.72)
+            }
+            return
+
+        adj = {}
+        for s in switches:
+            adj[str(s.get("id", "")).lower()] = set()
+        for h in hosts:
+            adj[str(h.get("id", "")).lower()] = set()
+
+        for lk in links:
+            u = str(lk.get("src", "")).lower()
+            v = str(lk.get("dst", "")).lower()
+            if u in adj and v in adj:
+                adj[u].add(v)
+                adj[v].add(u)
+
+        # Identify Ingress and Egress switches
+        ingress_switch = None
+        egress_switch = None
+
+        for s in switches:
+            s_id = str(s.get("id", "")).lower()
+            role = str(s.get("role", "")).lower()
+            if role == "ingress" or "ingress" in s_id:
+                ingress_switch = s_id
+            elif role == "egress" or "egress" in s_id:
+                egress_switch = s_id
+
+        if not ingress_switch:
+            for h in hosts:
+                role = str(h.get("role", "")).lower()
+                conn = str(h.get("connected_to", "")).lower()
+                if "sender" in role or "h1" in str(h.get("id", "")).lower():
+                    if conn in adj:
+                        ingress_switch = conn
+                        break
+
+        if not egress_switch:
+            for h in hosts:
+                role = str(h.get("role", "")).lower()
+                conn = str(h.get("connected_to", "")).lower()
+                if "receiver" in role or "h2" in str(h.get("id", "")).lower():
+                    if conn in adj:
+                        egress_switch = conn
+                        break
+
+        switch_ids = [str(s.get("id", "")).lower() for s in switches]
+        if not ingress_switch and switch_ids:
+            ingress_switch = switch_ids[0]
+        if not egress_switch and switch_ids:
+            egress_switch = switch_ids[-1]
+
+        # BFS shortest-path distance from ingress switch
+        dist = {s_id: 999 for s_id in switch_ids}
+        if ingress_switch:
+            dist[ingress_switch] = 0
+            q = [ingress_switch]
+            while q:
+                curr = q.pop(0)
+                for neighbor in adj.get(curr, []):
+                    if neighbor in dist and dist[neighbor] > dist[curr] + 1:
+                        dist[neighbor] = dist[curr] + 1
+                        q.append(neighbor)
+
+        # Build layers for switches
+        valid_hops = [d for d in dist.values() if d < 999]
+        max_hop = max(valid_hops) if valid_hops else 1
+        layers = {}
+        for s_id in switch_ids:
+            h_val = dist.get(s_id, 1)
+            if s_id == egress_switch and max_hop > 1:
+                h_val = max_hop
+            layers.setdefault(h_val, []).append(s_id)
+
+        sorted_layer_keys = sorted(layers.keys())
+
+        # Total columns = Ingress Hosts (0) + Switch Layers (1..N) + Egress Hosts (N+1)
+        total_cols = 1 + len(sorted_layer_keys) + 1
+        x_step = 0.84 / max(1, total_cols - 1)
+        x_start = 0.08
+
+        col_idx = 1
+        for l_key in sorted_layer_keys:
+            s_list = layers[l_key]
+            col_x = x_start + col_idx * x_step
+
+            n_nodes = len(s_list)
+            if n_nodes == 1:
+                self._auto_layout_positions[s_list[0]] = (round(col_x, 3), 0.50)
+            elif n_nodes == 2:
+                self._auto_layout_positions[s_list[0]] = (round(col_x, 3), 0.24)
+                self._auto_layout_positions[s_list[1]] = (round(col_x, 3), 0.76)
+            else:
+                y_span = 0.56
+                y_step = y_span / max(1, n_nodes - 1)
+                for i, sid in enumerate(s_list):
+                    y_pos = 0.22 + i * y_step
+                    self._auto_layout_positions[sid] = (round(col_x, 3), round(y_pos, 3))
+            col_idx += 1
+
+        # Place Hosts
+        in_hosts = []
+        eg_hosts = []
+        other_hosts = []
+
+        for h in hosts:
+            h_id = str(h.get("id", "")).lower()
+            role = str(h.get("role", "")).lower()
+            conn = str(h.get("connected_to", "")).lower()
+            if "sender" in role or conn == ingress_switch or "h1" in h_id or "h3" in h_id:
+                in_hosts.append(h_id)
+            elif "receiver" in role or conn == egress_switch or "h2" in h_id or "h4" in h_id:
+                eg_hosts.append(h_id)
+            else:
+                other_hosts.append(h_id)
+
+        # Ingress Hosts
+        if len(in_hosts) == 1:
+            self._auto_layout_positions[in_hosts[0]] = (0.08, 0.50)
+        elif len(in_hosts) == 2:
+            self._auto_layout_positions[in_hosts[0]] = (0.08, 0.28)  # H1
+            self._auto_layout_positions[in_hosts[1]] = (0.08, 0.72)  # H3
+        else:
+            y_step = 0.56 / max(1, len(in_hosts) - 1)
+            for i, hid in enumerate(in_hosts):
+                self._auto_layout_positions[hid] = (0.08, round(0.22 + i * y_step, 3))
+
+        # Egress Hosts
+        if len(eg_hosts) == 1:
+            self._auto_layout_positions[eg_hosts[0]] = (0.92, 0.50)
+        elif len(eg_hosts) == 2:
+            self._auto_layout_positions[eg_hosts[0]] = (0.92, 0.28)  # H2
+            self._auto_layout_positions[eg_hosts[1]] = (0.92, 0.72)  # H4
+        else:
+            y_step = 0.56 / max(1, len(eg_hosts) - 1)
+            for i, hid in enumerate(eg_hosts):
+                self._auto_layout_positions[hid] = (0.92, round(0.22 + i * y_step, 3))
+
+        for hid in other_hosts:
+            node = self.topo_def.get_node(hid) if self.topo_def else None
+            conn = str(node.get("connected_to", "")).lower() if node else ""
+            if conn in self._auto_layout_positions:
+                sx, sy = self._auto_layout_positions[conn]
+                self._auto_layout_positions[hid] = (round(min(0.95, sx + 0.08), 3), round(min(0.90, sy + 0.15), 3))
+            else:
+                self._auto_layout_positions[hid] = (0.50, 0.15)
+
+    def get_active_node_pos(self, node_id: str, default: Tuple[float, float] = (0.5, 0.5)) -> Tuple[float, float]:
+        """Returns normalized coordinates under auto-arranged layout or raw file coordinates."""
+        n_lower = str(node_id).lower()
+        if getattr(self, "use_auto_layout", True) and n_lower in getattr(self, "_auto_layout_positions", {}):
+            return self._auto_layout_positions[n_lower]
+        if self.topo_def:
+            return self.topo_def.get_node_pos(n_lower, default)
+        return default
+
     def set_topology(self, topo):
         """Applies a newly loaded TopologyDefinition and refreshes canvas."""
         self.topo_def = topo
+        self.auto_arrange_topology()
+        self.reset_view()
         self._rendered_wires.clear()
         self._hovered_wire = None
         self.update()
@@ -339,15 +705,69 @@ class AnimatedTopologyCanvas(QWidget):
         proj_y = y1 + t * dy
         return math.hypot(px - proj_x, py - proj_y)
 
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.zoom_in(factor=1.15, center_pt=event.position().toPoint())
+        elif delta < 0:
+            self.zoom_out(factor=1.15, center_pt=event.position().toPoint())
+        event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
+            self._is_panning = True
+            self._pan_start = event.position().toPoint()
+            self._has_panned = False
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if getattr(self, "_is_panning", False):
+            self._is_panning = False
+            self._pan_start = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        self.reset_view()
+        event.accept()
+
+    def leaveEvent(self, event):
+        self._is_panning = False
+        self._pan_start = None
+        self._hovered_wire = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        QToolTip.hideText()
+        self.update()
+        super().leaveEvent(event)
+
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.position().toPoint()
+
+        # Handle Viewport Pan Drag
+        if getattr(self, "_is_panning", False) and getattr(self, "_pan_start", None):
+            delta = pos - self._pan_start
+            self._pan_start = pos
+            self.pan_x += delta.x()
+            self.pan_y += delta.y()
+            self._has_panned = True
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            QToolTip.hideText()
+            self.update()
+            event.accept()
+            return
+
         mx, my = pos.x(), pos.y()
         closest_wire = None
         min_dist = float("inf")
 
+        hover_thresh = max(10.0, 15.0 * math.sqrt(self.zoom_level))
         for w_info in getattr(self, "_rendered_wires", []):
             d = self._dist_to_segment((mx, my), w_info["p1"], w_info["p2"])
-            if d < min_dist and d <= 15.0:
+            if d < min_dist and d <= hover_thresh:
                 min_dist = d
                 closest_wire = w_info
 
@@ -425,13 +845,6 @@ class AnimatedTopologyCanvas(QWidget):
                 self.update()
         super().mouseMoveEvent(event)
 
-    def leaveEvent(self, event):
-        self._hovered_wire = None
-        self.setCursor(Qt.CursorShape.ArrowCursor)
-        QToolTip.hideText()
-        self.update()
-        super().leaveEvent(event)
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -448,54 +861,61 @@ class AnimatedTopologyCanvas(QWidget):
         if self.topo_def:
             for s in self.topo_def.switches:
                 s_id = str(s.get("id", "")).lower()
-                px, py = self.topo_def.get_node_pos(s_id, (0.50, 0.50))
-                node_positions[s_id] = (int(w * px), int(h * py))
+                px, py = self.get_active_node_pos(s_id, (0.50, 0.50))
+                node_positions[s_id] = self.to_screen_coords(px, py, w, h)
             for host in self.topo_def.hosts:
                 h_id = str(host.get("id", "")).lower()
-                px, py = self.topo_def.get_node_pos(h_id, (0.10, 0.50))
-                node_positions[h_id] = (int(w * px), int(h * py))
+                px, py = self.get_active_node_pos(h_id, (0.10, 0.50))
+                node_positions[h_id] = self.to_screen_coords(px, py, w, h)
         else:
-            node_positions = {
-                "h1": (int(w * 0.08), int(h * 0.28)),
-                "h3": (int(w * 0.08), int(h * 0.72)),
-                "s1": (int(w * 0.26), int(h * 0.50)),
-                "s2": (int(w * 0.50), int(h * 0.22)),  # Path A
-                "s3": (int(w * 0.50), int(h * 0.78)),  # Path B
-                "s4": (int(w * 0.74), int(h * 0.50)),
-                "h2": (int(w * 0.92), int(h * 0.28)),
-                "h4": (int(w * 0.92), int(h * 0.72)),
+            base_nodes = {
+                "h1": (0.08, 0.28),
+                "h3": (0.08, 0.72),
+                "s1": (0.26, 0.50),
+                "s2": (0.50, 0.22),
+                "s3": (0.50, 0.78),
+                "s4": (0.74, 0.50),
+                "h2": (0.92, 0.28),
+                "h4": (0.92, 0.72),
             }
+            for nid, (px, py) in base_nodes.items():
+                if getattr(self, "use_auto_layout", True) and nid in getattr(self, "_auto_layout_positions", {}):
+                    px, py = self._auto_layout_positions[nid]
+                node_positions[nid] = self.to_screen_coords(px, py, w, h)
 
         self._rendered_wires.clear()
 
         def draw_link(p1, p2, pen_or_color, thickness=3, label=None, alert=False, evaluating=False, wire_meta=None):
+            eff_thick = int(max(1, min(14, thickness * math.sqrt(self.zoom_level))))
             is_hovered = False
             if wire_meta and self._hovered_wire:
                 is_hovered = (self._hovered_wire.get("wire_id") == wire_meta.get("wire_id"))
 
             # 1. Outer luminous glow if hovered, congested, or active
             if is_hovered:
-                glow_pen = QPen(QColor(137, 180, 250, 180), thickness + 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                glow_pen = QPen(QColor(137, 180, 250, 180), eff_thick + 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
                 painter.setPen(glow_pen)
                 painter.drawLine(p1[0], p1[1], p2[0], p2[1])
             elif alert:
-                glow_pen = QPen(QColor(243, 139, 168, 70), thickness + 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                glow_pen = QPen(QColor(243, 139, 168, 70), eff_thick + 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
                 painter.setPen(glow_pen)
                 painter.drawLine(p1[0], p1[1], p2[0], p2[1])
             elif evaluating:
-                glow_pen = QPen(QColor(250, 179, 135, 80), thickness + 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                glow_pen = QPen(QColor(250, 179, 135, 80), eff_thick + 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
                 painter.setPen(glow_pen)
                 painter.drawLine(p1[0], p1[1], p2[0], p2[1])
             elif thickness >= 4:
-                glow_pen = QPen(QColor(166, 227, 161, 50), thickness + 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                glow_pen = QPen(QColor(166, 227, 161, 50), eff_thick + 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
                 painter.setPen(glow_pen)
                 painter.drawLine(p1[0], p1[1], p2[0], p2[1])
 
             # 2. Main core wire line
             if isinstance(pen_or_color, QPen):
-                painter.setPen(pen_or_color)
+                p_copy = QPen(pen_or_color)
+                p_copy.setWidth(eff_thick)
+                painter.setPen(p_copy)
             else:
-                painter.setPen(QPen(pen_or_color, thickness, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                painter.setPen(QPen(pen_or_color, eff_thick, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawLine(p1[0], p1[1], p2[0], p2[1])
 
             # 3. Label on link midpoint
@@ -635,22 +1055,22 @@ class AnimatedTopologyCanvas(QWidget):
             draw_link(pos_s1, pos_s3, color_b, thick_b, label_b, wire_meta=meta_b)
             draw_link(pos_s3, pos_s4, color_b, thick_b, wire_meta={"wire_id": "path_b_s3_s4", "src": "s3", "dst": "s4", "segment": "path_b", "load": self.path_b_load, "capacity": 10.0, "is_active": is_path_b_active, "is_alert": False, "is_evaluating": False})
 
-        # Dynamic Queue Meter for Active Route
-        q_box_x = int(w * 0.34)
-        q_box_y = int(h * 0.08)
+        # Dynamic Queue Meter for Active Route (Fixed HUD at top center)
         q_box_w = min(170, int(w * 0.26))
+        q_box_x = int((w - q_box_w) / 2)
+        q_box_y = 12
         painter.setBrush(self._brush_q_bg)
         painter.setPen(self._pen_q_border)
-        painter.drawRect(q_box_x, q_box_y, q_box_w, 14)
+        painter.drawRect(q_box_x, q_box_y, q_box_w, 18)
         fill_w = int(q_box_w * (self.queue_occupancy / 100.0))
         q_brush = self._brush_q_pink if self.queue_occupancy > 80 else (self._brush_q_yellow if self.queue_occupancy > 50 else self._brush_q_green)
-        painter.fillRect(q_box_x, q_box_y, fill_w, 14, q_brush)
+        painter.fillRect(q_box_x, q_box_y, fill_w, 18, q_brush)
         painter.setPen(self._color_text_white)
         painter.setFont(self._font_bold_7)
-        painter.drawText(q_box_x + 6, q_box_y + 11, f"Queue ({self.active_path}): {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts")
+        painter.drawText(q_box_x + 6, q_box_y + 13, f"Queue ({self.active_path}): {int(self.queue_occupancy * self.queue_limit / 100)}/{self.queue_limit} pkts")
 
         def draw_node(pos, text, subtext, bg_color, is_switch=False):
-            rad = 20 if is_switch else 17
+            rad = int(max(14, min(38, (20 if is_switch else 17) * math.sqrt(self.zoom_level))))
             painter.setBrush(QBrush(bg_color))
             painter.setPen(self._pen_node)
             if is_switch:
@@ -664,7 +1084,7 @@ class AnimatedTopologyCanvas(QWidget):
 
             painter.setPen(self._color_text_dim)
             painter.setFont(self._font_regular_7)
-            painter.drawText(pos[0] - 35, pos[1] + rad + 1, 70, 14, Qt.AlignmentFlag.AlignCenter, subtext)
+            painter.drawText(pos[0] - rad - 25, pos[1] + rad + 2, (rad * 2) + 50, 14, Qt.AlignmentFlag.AlignCenter, subtext)
 
         # Dynamic Node Rendering from TopologyDefinition
         if self.topo_def and (self.topo_def.switches or self.topo_def.hosts):
@@ -686,14 +1106,14 @@ class AnimatedTopologyCanvas(QWidget):
                     c = QColor(c_str) if c_str else self._color_h1
                     draw_node(pos, name, sub, c, is_switch=False)
         else:
-            pos_h1 = node_positions.get("h1", (int(w * 0.08), int(h * 0.28)))
-            pos_h3 = node_positions.get("h3", (int(w * 0.08), int(h * 0.72)))
-            pos_s1 = node_positions.get("s1", (int(w * 0.26), int(h * 0.50)))
-            pos_s2 = node_positions.get("s2", (int(w * 0.50), int(h * 0.22)))
-            pos_s3 = node_positions.get("s3", (int(w * 0.50), int(h * 0.78)))
-            pos_s4 = node_positions.get("s4", (int(w * 0.74), int(h * 0.50)))
-            pos_h2 = node_positions.get("h2", (int(w * 0.92), int(h * 0.28)))
-            pos_h4 = node_positions.get("h4", (int(w * 0.92), int(h * 0.72)))
+            pos_h1 = node_positions.get("h1", self.to_screen_coords(0.08, 0.28, w, h))
+            pos_h3 = node_positions.get("h3", self.to_screen_coords(0.08, 0.72, w, h))
+            pos_s1 = node_positions.get("s1", self.to_screen_coords(0.26, 0.50, w, h))
+            pos_s2 = node_positions.get("s2", self.to_screen_coords(0.50, 0.22, w, h))
+            pos_s3 = node_positions.get("s3", self.to_screen_coords(0.50, 0.78, w, h))
+            pos_s4 = node_positions.get("s4", self.to_screen_coords(0.74, 0.50, w, h))
+            pos_h2 = node_positions.get("h2", self.to_screen_coords(0.92, 0.28, w, h))
+            pos_h4 = node_positions.get("h4", self.to_screen_coords(0.92, 0.72, w, h))
 
             draw_node(pos_h1, "H1", "10.0.0.1", self._color_h1)
             draw_node(pos_h3, "H3", "10.0.0.3", self._color_h3)
@@ -880,7 +1300,8 @@ class LiveSDNReroutingAnalyticsWidget(QWidget):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setStyleSheet("""
-            QScrollArea { border: none; background: transparent; }
+            QScrollArea { border: none; background-color: #1e1e2e; }
+            QScrollArea > QWidget > QWidget { background-color: #1e1e2e; }
             QScrollBar:vertical {
                 background: #181825;
                 width: 12px;
@@ -1580,7 +2001,10 @@ class AutomatedBenchmarkWidget(QWidget):
         self.scroll_area.setStyleSheet("""
             QScrollArea {
                 border: none;
-                background-color: transparent;
+                background-color: #1e1e2e;
+            }
+            QScrollArea > QWidget > QWidget {
+                background-color: #1e1e2e;
             }
             QScrollBar:vertical {
                 background: #181825;
@@ -2035,17 +2459,27 @@ class MasterSDNGUI(QMainWindow):
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QWidget { color: #cdd6f4; font-family: 'Segoe UI', -apple-system, sans-serif; font-size: 12px; }
-            QToolTip { background-color: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 2px; }
+            QLabel { color: #cdd6f4; }
+            QToolTip { background-color: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 4px; }
             QTabWidget::pane { border: 1px solid #313244; background: #181825; border-radius: 6px; }
-            QTabBar::tab { background: #313244; padding: 9px 20px; margin-right: 4px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; }
+            QTabBar::tab { background: #313244; color: #a6adc8; padding: 9px 20px; margin-right: 4px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; }
             QTabBar::tab:selected { background: #89b4fa; color: #11111b; font-weight: bold; }
-            QGroupBox { border: 1px solid #45475a; border-radius: 6px; margin-top: 8px; font-weight: bold; padding: 8px; }
+            QGroupBox { border: 1px solid #45475a; border-radius: 6px; margin-top: 10px; font-weight: bold; padding: 8px; color: #cdd6f4; }
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #89b4fa; }
-            QPushButton { background-color: #313244; border: 1px solid #45475a; border-radius: 6px; padding: 6px 12px; font-weight: bold; }
-            QPushButton:hover { background-color: #45475a; }
+            QPushButton { background-color: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 6px 12px; font-weight: bold; }
+            QPushButton:hover { background-color: #45475a; color: #ffffff; }
+            QPushButton:pressed { background-color: #585b70; }
             QSlider::groove:horizontal { height: 6px; background: #313244; border-radius: 3px; }
             QSlider::sub-page:horizontal { background: #89b4fa; border-radius: 3px; }
             QSlider::handle:horizontal { background: #b4befe; width: 16px; height: 16px; margin: -5px 0; border-radius: 8px; }
+            QComboBox { background-color: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 4px 8px; }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox QAbstractItemView { background-color: #181825; color: #cdd6f4; selection-background-color: #89b4fa; selection-color: #11111b; border: 1px solid #45475a; outline: none; }
+            QComboBox QAbstractItemView::item { background-color: #181825; color: #cdd6f4; padding: 4px 8px; min-height: 20px; }
+            QComboBox QAbstractItemView::item:selected { background-color: #89b4fa; color: #11111b; }
+            QLineEdit, QTextEdit, QPlainTextEdit { background-color: #11111b; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; }
+            QScrollArea { background-color: #1e1e2e; border: none; }
+            QScrollArea > QWidget > QWidget { background-color: #1e1e2e; }
             QMenuBar { background-color: #181825; color: #cdd6f4; border-bottom: 1px solid #313244; padding: 2px; }
             QMenuBar::item { background: transparent; padding: 4px 10px; }
             QMenuBar::item:selected { background: #313244; border-radius: 4px; }
@@ -2432,9 +2866,27 @@ class MasterSDNGUI(QMainWindow):
         right_scroll = QScrollArea()
         right_scroll.setWidgetResizable(True)
         right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        right_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        right_scroll.setStyleSheet("""
+            QScrollArea { border: none; background-color: #1e1e2e; }
+            QScrollArea > QWidget > QWidget { background-color: #1e1e2e; }
+            QScrollBar:vertical {
+                background: #181825;
+                width: 10px;
+                margin: 0px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #45475a;
+                min-height: 24px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #89b4fa;
+            }
+        """)
 
         right_content = QWidget()
+        right_content.setStyleSheet("background-color: #1e1e2e; color: #cdd6f4;")
         r_layout = QVBoxLayout(right_content)
         r_layout.setContentsMargins(4, 0, 8, 0)
         r_layout.setSpacing(6)
@@ -2467,7 +2919,8 @@ class MasterSDNGUI(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setStyleSheet("""
-            QScrollArea { border: none; background: transparent; }
+            QScrollArea { border: none; background-color: #1e1e2e; }
+            QScrollArea > QWidget > QWidget { background-color: #1e1e2e; }
             QScrollBar:vertical {
                 background: #181825;
                 width: 12px;
@@ -3241,6 +3694,233 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
+
+    # 1. Force Fusion Style for complete cross-platform dark mode compliance (Linux/WSL/Windows)
+    app.setStyle("Fusion")
+
+    # 2. Universal Catppuccin Mocha Dark Palette eliminating OS white fallback
+    dark_palette = QPalette()
+    dark_palette.setColor(QPalette.ColorRole.Window, QColor("#1e1e2e"))
+    dark_palette.setColor(QPalette.ColorRole.WindowText, QColor("#cdd6f4"))
+    dark_palette.setColor(QPalette.ColorRole.Base, QColor("#181825"))
+    dark_palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#313244"))
+    dark_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#181825"))
+    dark_palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#cdd6f4"))
+    dark_palette.setColor(QPalette.ColorRole.Text, QColor("#cdd6f4"))
+    dark_palette.setColor(QPalette.ColorRole.Button, QColor("#313244"))
+    dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor("#cdd6f4"))
+    dark_palette.setColor(QPalette.ColorRole.BrightText, QColor("#f38ba8"))
+    dark_palette.setColor(QPalette.ColorRole.Link, QColor("#89b4fa"))
+    dark_palette.setColor(QPalette.ColorRole.Highlight, QColor("#89b4fa"))
+    dark_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#11111b"))
+    app.setPalette(dark_palette)
+
+    # 3. Global Stylesheet enforcing dark theme across all native widgets & dialogs
+    app.setStyleSheet("""
+        QMainWindow, QWidget, QDialog, QMessageBox {
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            font-family: 'Segoe UI', -apple-system, sans-serif;
+            font-size: 12px;
+        }
+        QLabel {
+            color: #cdd6f4;
+        }
+        QScrollArea {
+            background-color: #1e1e2e;
+            border: none;
+        }
+        QScrollArea > QWidget > QWidget {
+            background-color: #1e1e2e;
+        }
+        QScrollBar:vertical {
+            background: #181825;
+            width: 10px;
+            margin: 0px;
+            border-radius: 5px;
+        }
+        QScrollBar::handle:vertical {
+            background: #45475a;
+            min-height: 24px;
+            border-radius: 5px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #89b4fa;
+        }
+        QScrollBar:horizontal {
+            background: #181825;
+            height: 10px;
+            margin: 0px;
+            border-radius: 5px;
+        }
+        QScrollBar::handle:horizontal {
+            background: #45475a;
+            min-width: 24px;
+            border-radius: 5px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background: #89b4fa;
+        }
+        QScrollBar::add-line, QScrollBar::sub-line {
+            width: 0px;
+            height: 0px;
+            border: none;
+        }
+        QComboBox {
+            background-color: #181825;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 20px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #181825;
+            color: #cdd6f4;
+            selection-background-color: #89b4fa;
+            selection-color: #11111b;
+            border: 1px solid #45475a;
+            outline: none;
+        }
+        QComboBox QAbstractItemView::item {
+            background-color: #181825;
+            color: #cdd6f4;
+            padding: 4px 8px;
+            min-height: 20px;
+        }
+        QComboBox QAbstractItemView::item:selected {
+            background-color: #89b4fa;
+            color: #11111b;
+        }
+        QLineEdit, QTextEdit, QPlainTextEdit {
+            background-color: #11111b;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 4px;
+            selection-background-color: #89b4fa;
+            selection-color: #11111b;
+        }
+        QGroupBox {
+            background-color: #181825;
+            border: 1px solid #313244;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-weight: bold;
+            padding: 8px;
+            color: #cdd6f4;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 4px;
+            color: #89b4fa;
+        }
+        QTabWidget::pane {
+            border: 1px solid #313244;
+            background: #181825;
+            border-radius: 6px;
+        }
+        QTabBar::tab {
+            background: #313244;
+            color: #a6adc8;
+            padding: 8px 18px;
+            margin-right: 4px;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            font-weight: bold;
+        }
+        QTabBar::tab:selected {
+            background: #89b4fa;
+            color: #11111b;
+            font-weight: bold;
+        }
+        QPushButton {
+            background-color: #313244;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #45475a;
+            color: #ffffff;
+        }
+        QPushButton:pressed {
+            background-color: #585b70;
+        }
+        QToolTip {
+            background-color: #181825;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+            border-radius: 6px;
+            padding: 4px;
+        }
+        QSplitter::handle {
+            background-color: #313244;
+        }
+        QSplitter::handle:hover {
+            background-color: #89b4fa;
+        }
+        QSlider::groove:horizontal {
+            height: 6px;
+            background: #313244;
+            border-radius: 3px;
+        }
+        QSlider::sub-page:horizontal {
+            background: #89b4fa;
+            border-radius: 3px;
+        }
+        QSlider::handle:horizontal {
+            background: #b4befe;
+            width: 16px;
+            height: 16px;
+            margin: -5px 0;
+            border-radius: 8px;
+        }
+        QTableWidget {
+            background-color: #11111b;
+            alternate-background-color: #181825;
+            color: #cdd6f4;
+            gridline-color: #313244;
+            border: 1px solid #45475a;
+        }
+        QHeaderView::section {
+            background-color: #181825;
+            color: #89b4fa;
+            border: 1px solid #313244;
+            padding: 4px;
+            font-weight: bold;
+        }
+        QMenuBar {
+            background-color: #181825;
+            color: #cdd6f4;
+            border-bottom: 1px solid #313244;
+            padding: 2px;
+        }
+        QMenuBar::item {
+            background: transparent;
+            padding: 4px 10px;
+        }
+        QMenuBar::item:selected {
+            background: #313244;
+            border-radius: 4px;
+        }
+        QMenu {
+            background-color: #181825;
+            color: #cdd6f4;
+            border: 1px solid #45475a;
+        }
+        QMenu::item:selected {
+            background-color: #89b4fa;
+            color: #11111b;
+        }
+    """)
+
     window = MasterSDNGUI()
     
     # Automatically maximize on Remote Desktop or smaller resolutions to give full space to panels
