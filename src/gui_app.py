@@ -2008,6 +2008,7 @@ class MasterSDNGUI(QMainWindow):
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QWidget { color: #cdd6f4; font-family: 'Segoe UI', -apple-system, sans-serif; font-size: 12px; }
+            QToolTip { background-color: #181825; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 2px; }
             QTabWidget::pane { border: 1px solid #313244; background: #181825; border-radius: 6px; }
             QTabBar::tab { background: #313244; padding: 9px 20px; margin-right: 4px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; }
             QTabBar::tab:selected { background: #89b4fa; color: #11111b; font-weight: bold; }
@@ -3206,7 +3207,18 @@ def main():
     )
     app = QApplication(sys.argv)
     window = MasterSDNGUI()
-    window.show()
+    
+    # Automatically maximize on Remote Desktop or smaller resolutions to give full space to panels
+    screen = app.primaryScreen()
+    if screen:
+        avail_geo = screen.availableGeometry()
+        if avail_geo.width() <= 1600 or avail_geo.height() <= 950:
+            window.showMaximized()
+        else:
+            window.show()
+    else:
+        window.show()
+
     sys.exit(app.exec())
 
 
