@@ -70,6 +70,7 @@ class UDPReceiver:
         self._window_received = 0
         self._window_latencies: List[float] = []
         self._last_window_time = 0.0
+        self._resync_on_next_packet = False
         self._lock = threading.Lock()
 
     def _setup_socket(self):
@@ -171,8 +172,9 @@ class UDPReceiver:
                 self.prev_transit_ms = transit_ms
 
                 # Sequence checking and loss detection
-                if flags == FLAG_START:
+                if flags == FLAG_START or self._resync_on_next_packet:
                     self.expected_seq = seq_num + 1
+                    self._resync_on_next_packet = False
                 else:
                     if seq_num > self.expected_seq:
                         gap = seq_num - self.expected_seq
@@ -233,6 +235,21 @@ class UDPReceiver:
             self._window_received = 0
             self._window_latencies = []
             self._last_window_time = current_time
+
+    def reset_window(self):
+        """Flushes rolling interval metrics and in-flight transit counters (e.g. after a route switch)."""
+        with self._lock:
+            self._window_bytes = 0
+            self._window_payload_bytes = 0
+            self._window_lost = 0
+            self._window_received = 0
+            self._window_latencies = []
+            self._last_window_time = time.time()
+            self.prev_transit_ms = None
+            self._resync_on_next_packet = True
+            if self.history:
+                self.history[-1]["loss_pct"] = 0.0
+                self.history[-1]["window_loss_pct"] = 0.0
 
     def get_latest_stats(self) -> Dict[str, Any]:
         """Thread-safe retrieval of current statistics."""

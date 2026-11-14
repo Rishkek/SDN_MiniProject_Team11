@@ -2034,6 +2034,7 @@ class MasterSDNGUI(QMainWindow):
             triggers_required=3
         )
         self.controller.start()
+        self.controller.add_reroute_listener(self._on_sdn_reroute_event)
 
         self.emulator = NetworkEmulator(controller=self.controller, ingress_port=9000)
         self.emulator.start()
@@ -2998,6 +2999,11 @@ class MasterSDNGUI(QMainWindow):
         self.controller.both_paths_congested = False
         QMessageBox.information(self, "Topology Reset", "Network topology reset to initial state. Active Path: Path-A.")
 
+    def _on_sdn_reroute_event(self, old_path: str, new_path: str):
+        """Flushes transient transition packets from receiver window immediately upon rerouting."""
+        if hasattr(self, "receiver") and self.receiver:
+            self.receiver.reset_window()
+
     def _refresh_telemetry(self):
         stats = self.receiver.get_latest_stats()
         ctrl_status = self.controller.get_controller_status()
@@ -3023,7 +3029,10 @@ class MasterSDNGUI(QMainWindow):
 
         # Feed real-time packet loss and latency feedback to the SDN controller!
         if hasattr(self, "controller") and self.controller:
-            self.controller.record_receiver_feedback(loss_pct=win_loss, latency_ms=lat)
+            time_since_reroute = time.time() - getattr(self.controller, "last_reroute_time", 0.0)
+            damping_sec = getattr(self.controller, "flap_damping_sec", 1.5)
+            feed_loss = 0.0 if (time_since_reroute < damping_sec) else win_loss
+            self.controller.record_receiver_feedback(loss_pct=feed_loss, latency_ms=lat)
 
         active_path = ctrl_status["active_path"]
         both_congested = bool(ctrl_status.get("all_paths_congested", ctrl_status.get("both_paths_congested")))

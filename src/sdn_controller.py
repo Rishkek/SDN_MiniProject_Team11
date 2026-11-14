@@ -60,13 +60,20 @@ class SDNController:
         poll_interval: float = POLL_INTERVAL_SEC,
         adaptive_routing_enabled: bool = True,
         auto_revert_enabled: bool = True,
-        triggers_required: int = CONSECUTIVE_TRIGGERS_REQUIRED
+        triggers_required: int = CONSECUTIVE_TRIGGERS_REQUIRED,
+        flap_damping_sec: Optional[float] = None
     ):
         self.congestion_threshold_mbps = congestion_threshold_mbps
         self.poll_interval = poll_interval
         self.adaptive_routing_enabled = adaptive_routing_enabled
         self.auto_revert_enabled = auto_revert_enabled
         self.triggers_required = max(1, int(triggers_required))
+        if flap_damping_sec is not None:
+            self.flap_damping_sec = max(0.0, float(flap_damping_sec))
+        else:
+            self.flap_damping_sec = 1.5 if self.poll_interval >= 0.3 else 0.05
+        self.last_reroute_time: float = 0.0
+        self.reroute_listeners: List[Any] = []
 
         self._running = False
         self._monitor_thread: Optional[threading.Thread] = None
@@ -130,6 +137,12 @@ class SDNController:
         if self._monitor_thread and self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=1.0)
         logger.info("SDN Controller stopped.")
+
+    def add_reroute_listener(self, cb: Callable[[str, str], None]):
+        """Registers a callback cb(old_path, new_path) called immediately upon rerouting."""
+        with self._lock:
+            if cb not in self.reroute_listeners:
+                self.reroute_listeners.append(cb)
 
     def _query_ovs_port_stats(self):
         """
@@ -273,8 +286,17 @@ class SDNController:
             # Multi-metric congestion evaluation:
             # 1. Bandwidth utilization breach (load >= 80% of capacity or >= configured threshold)
             # 2. End-to-end packet loss breach (loss >= configured loss threshold, default 3.0%)
+            # Route Flap Damping / Post-Failover Grace Period:
+            # During the settling period immediately after a reroute, packet loss breaches
+            # are suppressed to allow in-flight packets to drain and the receiver window to stabilize.
+            time_since_reroute = time.time() - self.last_reroute_time
+            in_damping = (time_since_reroute < self.flap_damping_sec)
+
             load_breached = (active_load >= effective_threshold)
-            loss_breached = (getattr(self, "latest_loss_pct", 0.0) >= getattr(self, "loss_threshold_pct", 3.0))
+            if in_damping:
+                loss_breached = False
+            else:
+                loss_breached = (getattr(self, "latest_loss_pct", 0.0) >= getattr(self, "loss_threshold_pct", 3.0))
             is_congested = load_breached or loss_breached
 
             # Congestion evaluation on the current active path
@@ -360,18 +382,20 @@ class SDNController:
                 self.both_paths_congested = False
                 self.all_paths_congested = False
 
-            # Hysteresis recovery logic: if not on primary path, check if primary has cooled down
-            if not self._is_path_a(active_path) and ("path_a" in self.paths or PATH_PRIMARY in self.paths):
+            # Hysteresis recovery logic: only evaluate if not in damping period and not on primary path
+            if not in_damping and not self._is_path_a(active_path) and ("path_a" in self.paths or PATH_PRIMARY in self.paths):
                 primary_cap = float(self.paths.get("path_a", self.paths.get(PATH_PRIMARY, {})).get("capacity_mbps", 10.0))
                 primary_load = self.latest_path_a_load_mbps
-                # Only revert if primary load dropped below recovery threshold AND primary capacity is healthy (>= 5.0M)
-                if primary_load < HYSTERESIS_RECOVERY_MBPS and primary_cap >= 5.0 and not is_congested:
+                clean_loss = getattr(self, "latest_loss_pct", 0.0) < getattr(self, "loss_threshold_pct", 3.0)
+                # Only revert if primary load dropped below recovery threshold AND primary capacity is healthy (>= 5.0M) AND receiver reports clean channel (< 3.0% loss)
+                if primary_load < HYSTERESIS_RECOVERY_MBPS and primary_cap >= 5.0 and not is_congested and clean_loss:
                     self.consecutive_recoveries += 1
-                    if self.auto_revert_enabled and self.consecutive_recoveries >= 4:
+                    req_recoveries = getattr(self, "recovery_triggers_required", 4)
+                    if self.auto_revert_enabled and self.consecutive_recoveries >= req_recoveries:
                         logger.info(
                             f"[HYSTERESIS RECOVERY] Primary path cooled down ({primary_load:.2f} Mbps < {HYSTERESIS_RECOVERY_MBPS} Mbps, Cap: {primary_cap:.1f} Mbps). Reverting to primary path."
                         )
-                        target = PATH_PRIMARY if active_path == PATH_ALTERNATE else "path_a"
+                        target = PATH_PRIMARY if (active_path == PATH_ALTERNATE or PATH_PRIMARY in self.paths) else "path_a"
                         self._trigger_reroute(to_path=target, reason="Primary path traffic dropped below recovery threshold")
                         self.consecutive_recoveries = 0
                 else:
@@ -395,7 +419,9 @@ class SDNController:
         self.current_active_path = to_path
         self.total_reroutes += 1
         self.consecutive_breaches = 0
+        self.consecutive_recoveries = 0
         self.latest_loss_pct = 0.0
+        self.last_reroute_time = time.time()
 
         event = {
             "timestamp": time.time(),
@@ -409,6 +435,13 @@ class SDNController:
         }
         self.reroute_events.append(event)
         logger.info(f"[+] REROUTE COMPLETE: Active path is now {to_path}. Failover latency: {self.recovery_time_sec * 1000:.2f} ms")
+
+        # Notify registered reroute listeners (e.g. to flush receiver telemetry window)
+        for cb in list(self.reroute_listeners):
+            try:
+                cb(old_path, to_path)
+            except Exception as e:
+                logger.debug(f"[SDNController] Reroute listener callback error: {e}")
 
     def _apply_flow_mod(self, path: str) -> bool:
         """
@@ -540,6 +573,9 @@ class SDNController:
                 "available_paths": list(self.paths.keys()),
                 "reroute_policy": self.reroute_policy,
                 "threshold_mbps": self.congestion_threshold_mbps,
+                "flap_damping_sec": self.flap_damping_sec,
+                "in_damping_period": (time.time() - self.last_reroute_time < self.flap_damping_sec),
+                "last_reroute_time": round(self.last_reroute_time, 2),
                 "total_reroutes": self.total_reroutes,
                 "latest_recovery_time_sec": self.recovery_time_sec,
                 "reroute_events": list(self.reroute_events)
