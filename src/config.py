@@ -30,6 +30,7 @@ CROSS_TRAFFIC_RATE_MBPS = 7.0 # Cross-traffic flow (6 + 7 = 13 Mbps > 10 Mbps ca
 # Congestion Detection Parameters
 CONGESTION_THRESHOLD_MBPS = 8.0       # Threshold to trigger rerouting (80% link capacity)
 CONGESTION_LOSS_THRESHOLD_PCT = 3.0   # Trigger reroute if loss rate exceeds 3%
+# Hysteresis prevents frequent path switching when network congestion fluctuates.
 HYSTERESIS_RECOVERY_MBPS = 4.5        # Load must drop below this to consider path fully recovered
 POLL_INTERVAL_SEC = 0.5               # Telemetry polling frequency
 CONSECUTIVE_TRIGGERS_REQUIRED = 2     # Number of consecutive breach intervals before rerouting
