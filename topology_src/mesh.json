@@ -18,9 +18,9 @@
       "id": "s2",
       "dpid": 2,
       "name": "S2",
-      "role": "core",
+      "role": "backup",
       "protocols": "OpenFlow13",
-      "subtext": "Core",
+      "subtext": "Backup",
       "x": 0.65,
       "y": 0.32
     },
@@ -28,9 +28,9 @@
       "id": "s3",
       "dpid": 3,
       "name": "S3",
-      "role": "backup",
+      "role": "core",
       "protocols": "OpenFlow13",
-      "subtext": "Backup",
+      "subtext": "Core",
       "x": 0.35,
       "y": 0.68
     },
@@ -120,19 +120,6 @@
       "id": "link_s1_s2",
       "src": "s1",
       "dst": "s2",
-      "label": "Path C",
-      "bw_mbps": 10.0,
-      "delay_ms": 5.0,
-      "max_queue": 100,
-      "type": "switch_edge",
-      "cable_alias": "med",
-      "path_segment": "path_c",
-      "is_bottleneck": true
-    },
-    {
-      "id": "link_s1_s3",
-      "src": "s1",
-      "dst": "s3",
       "label": "Path B",
       "bw_mbps": 10.0,
       "delay_ms": 5.0,
@@ -140,6 +127,19 @@
       "type": "switch_edge",
       "cable_alias": "med",
       "path_segment": "path_b",
+      "is_bottleneck": true
+    },
+    {
+      "id": "link_s1_s3",
+      "src": "s1",
+      "dst": "s3",
+      "label": "Path C",
+      "bw_mbps": 10.0,
+      "delay_ms": 5.0,
+      "max_queue": 100,
+      "type": "switch_edge",
+      "cable_alias": "med",
+      "path_segment": "path_c",
       "is_bottleneck": true
     },
     {
@@ -178,7 +178,7 @@
       "max_queue": 100,
       "type": "switch_edge",
       "cable_alias": "med",
-      "path_segment": "path_c",
+      "path_segment": "path_b",
       "is_bottleneck": true
     },
     {
@@ -191,7 +191,7 @@
       "max_queue": 100,
       "type": "switch_edge",
       "cable_alias": "med",
-      "path_segment": "path_b",
+      "path_segment": "path_c",
       "is_bottleneck": true
     },
     {
@@ -235,11 +235,11 @@
     },
     "path_b": {
       "id": "path_b",
-      "name": "Path-B (S1 -> S3 -> S4)",
+      "name": "Path-B (S1 -> S2 -> S4)",
       "role": "alternate",
       "hops": [
         "s1",
-        "s3",
+        "s2",
         "s4"
       ],
       "delay_ms": 10.0,
@@ -249,11 +249,11 @@
     },
     "path_c": {
       "id": "path_c",
-      "name": "Path-C (S1 -> S2 -> S4)",
+      "name": "Path-C (S1 -> S3 -> S4)",
       "role": "backup",
       "hops": [
         "s1",
-        "s2",
+        "s3",
         "s4"
       ],
       "delay_ms": 10.0,

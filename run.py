@@ -201,47 +201,40 @@ def run_test_suite():
     subprocess.call([sys.executable, "-m", "pytest", "-v", os.path.join(BASE_DIR, "tests")])
 
 
-def show_rubric_mapping():
-    """Displays project mapping against evaluation criteria."""
-    mapping = """
+def show_architecture_specifications():
+    """Displays technical architecture and system specifications mapping."""
+    spec = """
 =============================================================================
-                 PROJECT RUBRIC & DELIVERABLES MAPPING
+             TECHNICAL ARCHITECTURE & SPECIFICATIONS MAPPING
 =============================================================================
-D1: Initial Deliverables (15 Marks)
-  [2 Marks] Problem Understanding & Architecture:
-            - Multi-path diamond topology (S1->S2->S4 vs S1->S3->S4)
-            - Telemetry-driven SDN closed-loop congestion mitigation.
-  [4 Marks] TCP/UDP Socket Implementation:
-            - src/protocol.py: Custom 22-byte binary datagram protocol.
-            - src/udp_sender.py: High-precision rate pacing & sequence tracking.
-            - src/udp_receiver.py: Sequence checking, RFC 3550 jitter, latency.
-  [4 Marks] Mininet + SDN Implementation:
-            - src/topology_loader.py: Custom JSON (.json) topology loader with Mininet translation.
-            - src/sdn_controller.py: OpenFlow 1.3 FlowMod dispatcher.
-            - src/ryu_controller.py: Ryu OpenFlow 1.3 controller application.
-  [3 Marks] Socket-SDN Integration:
-            - End-to-end integration: link saturation triggers dynamic FlowMod.
-  [2 Marks] Initial Testing & Demo:
-            - tests/test_system.py: automated pytest validation suite.
+Section 1: Core System Architecture & Networking Foundations
+  - Multi-path network topologies (e.g. Diamond, Clos Mesh, Stress Mesh)
+  - Telemetry-driven SDN closed-loop congestion mitigation engine
+  - Custom 22-byte binary datagram protocol (src/protocol.py)
+  - High-precision monotonic rate pacing & sequence tracking (src/udp_sender.py)
+  - Sliding-window telemetry, RFC 3550 jitter & one-way latency (src/udp_receiver.py)
+  - Multi-path network topology loader & Mininet translation (src/topology_loader.py)
+  - OpenFlow 1.3 FlowMod dispatcher & telemetry collector (src/sdn_controller.py)
+  - Standard Ryu OpenFlow 1.3 controller application (src/ryu_controller.py)
+  - Dynamic link saturation triggers real-time OpenFlow FlowMod reroutes
+  - Comprehensive unit and system regression test suite (tests/)
 
-D2: Advanced Deliverables (25 Marks)
-  [4 Marks] Complete Application Functionality:
-            - Multiple flows (Main H1->H2, Cross H3->H4, Probes).
-  [6 Marks] Dynamic SDN Functionality:
-            - Telemetry polling (0.5s), threshold detection (>8.0 Mbps),
-              hysteresis recovery (<4.5 Mbps), and automatic failover.
-  [4 Marks] Challenging Scenario / Robustness:
-            - 13 Mbps burst across 10 Mbps link -> bufferbloat & drop stress.
-  [5 Marks] Performance Evaluation & Comparison:
-            - src/benchmark.py: Side-by-side Static vs Dynamic comparison.
-            - evaluation_results.png: 4-panel publication-quality plots.
-  [6 Marks] Documentation, Final Demo & Viva:
-            - README.md: Comprehensive setup & reproduction guide.
-            - study1.md, study2.md, study3.md: Subsystem architectural guides.
-            - viva1.md, viva2.md, viva3.md: Step-by-step demo guides & viva Q&A.
+Section 2: Advanced Telemetry & Dynamic Rerouting Engine
+  - Multi-flow orchestration (Main flow, Cross-traffic burst, Telemetry probes)
+  - Sub-second telemetry polling, congestion detection, and hysteresis recovery
+  - Physical cable diversity & Shared Risk Link Group (SRLG) aware failover
+  - Automated comparative benchmark engine: Static vs Adaptive routing (src/benchmark.py)
+  - Empirical 4-panel evaluation figure & summary metrics (evaluation_results.png)
+  - Hardware-accelerated real-time visualization dashboard (src/gui_app.py)
+  - Technical reference and operational documentation (README.md, CODEBASE_FUNCTIONS.md)
 =============================================================================
     """
-    print(mapping)
+    print(spec)
+
+
+def show_rubric_mapping():
+    """Backward-compatible alias for show_architecture_specifications."""
+    show_architecture_specifications()
 
 
 def interactive_menu():
@@ -255,7 +248,7 @@ def interactive_menu():
         print("  [5] Run UDP Receiver Tool Manually")
         print("  [6] Run Cross-Traffic Congestion Injector Manually")
         print("  [7] Run Automated Unit & System Test Suite")
-        print("  [8] View Project Architecture & Rubric Mapping")
+        print("  [8] View Technical Architecture & Specifications")
         print("  [9] Exit")
         print("-" * 65)
 
@@ -290,8 +283,8 @@ def interactive_menu():
             ])
         elif choice in ("7", "test"):
             run_test_suite()
-        elif choice in ("8", "rubric"):
-            show_rubric_mapping()
+        elif choice in ("8", "spec", "architecture", "rubric"):
+            show_architecture_specifications()
         elif choice in ("9", "q", "quit", "exit"):
             print("\nExiting. Thank you!")
             break
@@ -368,10 +361,13 @@ def main():
     parser.add_argument("--benchmark", action="store_true", help="Run comparative benchmark and generate plots")
     parser.add_argument("--mininet", action="store_true", help="Launch Mininet topology (Linux only)")
     parser.add_argument("--test", action="store_true", help="Run test suite")
+    parser.add_argument("--spec", "--rubric", dest="spec", action="store_true", help="View architecture and technical specifications")
     args = parser.parse_args()
 
     if args.cli:
         interactive_menu()
+    elif args.spec:
+        show_architecture_specifications()
     elif args.monitor:
         run_packet_monitor()
     elif args.demo:
